@@ -70,7 +70,7 @@ func (h *HandlerMessageService) SendMessage(w http.ResponseWriter, r *http.Reque
 	taskResult, err = msgServiceProcess(ctx, &msgservice.Task{
 		TraceInfo:               logger.MustExtract(ctx),
 		TaskID:                  fmt.Sprint(uuid),
-		AppClientID:             reqBody.ClientID,
+		ClientID:                reqBody.ClientID,
 		TaskPayloadFCMMulticast: fcmMulticast,
 		TaskPayloadFCMLegacy:    fcmLegacy,
 		TaskPayloadWebhook:      reqBody.Webhook,

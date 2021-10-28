@@ -1,9 +1,8 @@
-package apprepo
+package fcmserverkeyrepo
 
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/jmoiron/sqlx"
@@ -33,27 +32,20 @@ func Postgres(conf RepoPostgresConfig) (service *RepoPostgres, err error) {
 	return
 }
 
-func (p *RepoPostgres) CreateApp(ctx context.Context, app App) (insertedApp App, err error) {
-	err = validator.New().Struct(app)
+func (p *RepoPostgres) CreateFCMServerKey(ctx context.Context, param FCMServerKey) (inserted FCMServerKey, err error) {
+	err = validator.New().Struct(param)
 	if err != nil {
 		err = fmt.Errorf("%w: %s", storage.ErrValidation, err)
 		return
 	}
 
-	app.ClientID = strings.TrimSpace(strings.ToLower(app.ClientID))
-
-	err = sqlx.GetContext(ctx, p.Config.Connection, &insertedApp, sqlCreateApp,
-		app.ClientID, app.Name, app.Enabled, app.CreatedAt,
+	err = sqlx.GetContext(ctx, p.Config.Connection, &inserted, sqlCreateNewFCMServerKey,
+		param.ID, param.AppID, param.ServerKey, param.CreatedAt,
 	)
 	return
 }
 
-func (p *RepoPostgres) GetAppByClientID(ctx context.Context, clientID string) (appData App, err error) {
-	clientID = strings.ToLower(strings.TrimSpace(clientID))
-	if clientID == "" {
-		return appData, storage.ErrAppWrongClientID
-	}
-
-	err = sqlx.GetContext(ctx, p.Config.Connection, &appData, sqlGetAppByClientID, clientID)
+func (p *RepoPostgres) GetFCMServerKeys(ctx context.Context, appID string) (serverKeys []FCMServerKey, err error) {
+	err = sqlx.SelectContext(ctx, p.Config.Connection, &serverKeys, sqlSelectFCMServerKey, appID)
 	return
 }

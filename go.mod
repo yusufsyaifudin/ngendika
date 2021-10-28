@@ -6,7 +6,8 @@ require (
 	firebase.google.com/go/v4 v4.5.0
 	github.com/appleboy/go-fcm v0.1.5
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
-	github.com/go-chi/chi/v5 v5.0.0
+	github.com/go-chi/chi/v5 v5.0.1
+	github.com/go-chi/docgen v1.2.0 // indirect
 	github.com/go-chi/httptracer v0.3.0
 	github.com/go-playground/validator/v10 v10.4.1
 	github.com/go-redis/redis/v7 v7.4.1

@@ -40,6 +40,18 @@ appRepo:
   cacheKeyPrefix: appStore
   redis: redis1 # refer to redis
 
+FCMServerKeyRepo:
+  database: db1 # refer to database
+  cache: false
+  cacheKeyPrefix: appStore
+  redis: redis1 # refer to redis
+
+FCMServiceAccountKeyRepo:
+  database: db1 # refer to database
+  cache: false
+  cacheKeyPrefix: appStore
+  redis: redis1 # refer to redis
+
 msgRepo:
   database: db1 # refer to database
   cache: false

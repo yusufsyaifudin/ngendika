@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/docgen"
 	"github.com/go-chi/httptracer"
 	"github.com/go-playground/validator/v10"
 	"github.com/opentracing/opentracing-go"
@@ -19,6 +20,10 @@ import (
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
 	"github.com/yusufsyaifudin/ngendika/pkg/uid"
+)
+
+const (
+	ClientIDHeaderKey = "Client-ID"
 )
 
 type Config struct {
@@ -39,11 +44,25 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 		return nil, fmt.Errorf("http transport config error: %w", err)
 	}
 
-	handlerApp := &HandlerAppService{
+	handlerApp, err := NewHandlerAppService(ConfigAppService{
 		Logger:              config.Log,
 		ResponseConstructor: response.NewResponseConstructor(config.DebugError),
 		ResponseWriter:      response.New(),
 		AppService:          config.AppService,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	handlerFCM, err := NewHandlerFCMService(ConfigFCMService{
+		Logger:              config.Log,
+		ResponseConstructor: response.NewResponseConstructor(config.DebugError),
+		ResponseWriter:      response.New(),
+		AppService:          config.AppService,
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	handlerPN := &HandlerMessageService{
@@ -150,17 +169,31 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	})
 
 	router.Route("/apps", func(r chi.Router) {
-		r.Post("/", handlerApp.CreateApp)                    // create apps
-		r.Get("/", nil)                                      // list of apps
-		r.Delete("/", nil)                                   // delete apps
-		r.Post("/fcm", handlerApp.PutFCMServiceAccountKey()) // add fcm cert
-		r.Delete("/fcm/{fcm_id}", nil)                       // delete fcm cert
+		r.Post("/", handlerApp.CreateApp()) // create apps
+		r.Get("/", nil)                     // list of apps
+		r.Put("/{client_id}", nil)          // modify some field in apps (support patching)
+		r.Delete("/{client_id}", nil)       // delete apps
+
+		r.Get("/fcm", handlerFCM.List())            // get paginate all fcm cert
+		r.Get("/fcm/{fcm_id}", handlerFCM.Upload()) // get fcm cert
+		r.Post("/fcm", handlerFCM.Upload())         // add fcm cert
+
+		// {"client_id": "", "fcm_id": ["", ""]}
+		r.Delete("/fcm", nil) // delete fcm cert, array of id
+
+		r.Get("/apns", handlerFCM.Upload())    // get apns cert
+		r.Post("/apns", handlerFCM.Upload())   // add apns cert
+		r.Delete("/apns", handlerFCM.Upload()) // delete apns cert
 	})
 
 	router.Route("/messages", func(r chi.Router) {
 		r.Post("/", handlerPN.SendMessage) // send message
 	})
 
+	fmt.Println(docgen.MarkdownRoutesDoc(router, docgen.MarkdownOpts{
+		ProjectPath: "github.com/go-chi/chi/v5",
+		Intro:       "Welcome to the chi/_examples/rest generated docs.",
+	}))
 	return &defaultHTTP{router: router}, nil
 }
 

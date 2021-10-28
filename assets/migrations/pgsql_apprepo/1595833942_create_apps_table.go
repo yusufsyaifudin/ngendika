@@ -43,7 +43,8 @@ func (m CreateAppsTable1595833942) Up(ctx context.Context) (sql string, err erro
 
 	sql = `
 CREATE TABLE IF NOT EXISTS apps (
-	client_id VARCHAR NOT NULL PRIMARY KEY,
+	id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+	client_id VARCHAR NOT NULL,
 	name VARCHAR NOT NULL DEFAULT '',
 	enabled BOOL NOT NULL DEFAULT true,
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()

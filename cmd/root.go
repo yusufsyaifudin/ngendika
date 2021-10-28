@@ -27,7 +27,7 @@ func init() {
 
 // Execute will execute the command
 func Execute() {
-	_rootCmd.PersistentFlags().StringP("config", "c", "", "Config file")
+	_rootCmd.PersistentFlags().StringP("config", "c", "", "cfg file")
 
 	if err := _rootCmd.Execute(); err != nil {
 		err = fmt.Errorf("error running program: %w", err)

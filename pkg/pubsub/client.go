@@ -21,7 +21,7 @@ type ISubscriber interface {
 	Shutdown(ctx context.Context) error
 }
 
-// ====== Config common
+// ====== cfg common
 
 type ConfigKafkaPublisher struct {
 	Brokers []string `validate:"required,unique"`

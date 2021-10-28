@@ -4,3 +4,4 @@ tmp
 config.yaml
 config_worker.yaml
 docs
+example/fcm-web-example

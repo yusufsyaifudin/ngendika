@@ -12,29 +12,43 @@ import (
 	"github.com/yusufsyaifudin/ngendika/config"
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/storage/apprepo"
+	"github.com/yusufsyaifudin/ngendika/storage/fcmserverkeyrepo"
+	"github.com/yusufsyaifudin/ngendika/storage/fcmsvcacckeyrepo"
 )
 
 // Container is an abstraction layer to be used in use-case to stitch all business logic.
 // Use this when you pass into another struct.
 type Container interface {
-	AppStore() apprepo.Repo
+	AppRepo() apprepo.Repo
+	FCMServerKeyRepo() fcmserverkeyrepo.Repo
+	FCMServiceAccountKeyRepo() fcmsvcacckeyrepo.Repo
 }
 
 // DefaultContainerImpl the real implementation of Container
 type DefaultContainerImpl struct {
-	ctx     context.Context
-	Config  config.Config `validate:"required"`
-	AppRepo apprepo.Repo  `validate:"required"`
-	Closer  []Closer      `validate:"required"` // this to trace what dependencies this Closer is related
+	ctx              context.Context
+	cfg              config.Config         `validate:"required"`
+	appRepo          apprepo.Repo          `validate:"required"`
+	fcmServerKeyRepo fcmserverkeyrepo.Repo `validate:"required"`
+	fcmSvcAccKeyRepo fcmsvcacckeyrepo.Repo `validate:"required"`
+	closer           []Closer              `validate:"required"` // this to trace what dependencies this closer is related
 }
 
 // Ensure that DefaultContainerImpl implements DefaultContainerImpl
 var _ Container = (*DefaultContainerImpl)(nil)
 
-// AppStore return appstore.Repo and return error when connection is closed or nil.
-// This should never caused panic.
-func (a *DefaultContainerImpl) AppStore() apprepo.Repo {
-	return a.AppRepo
+// AppRepo return appstore.Repo and return error when connection is closed or nil.
+// This should never have caused panic.
+func (a *DefaultContainerImpl) AppRepo() apprepo.Repo {
+	return a.appRepo
+}
+
+func (a *DefaultContainerImpl) FCMServerKeyRepo() fcmserverkeyrepo.Repo {
+	return a.fcmServerKeyRepo
+}
+
+func (a *DefaultContainerImpl) FCMServiceAccountKeyRepo() fcmsvcacckeyrepo.Repo {
+	return a.fcmSvcAccKeyRepo
 }
 
 // Close will close all dependencies.
@@ -43,12 +57,12 @@ func (a *DefaultContainerImpl) Close() error {
 	ctx := logger.Inject(context.Background(), logger.Tracer{AppTraceID: "startup"})
 	logger.Debug(ctx, "dependencies: trying to close")
 
-	if a.Closer == nil {
+	if a.closer == nil {
 		logger.Debug(ctx, "dependencies: nothing to close")
 		return nil
 	}
 
-	return CloseAllSQLConnection(a.ctx, a.Closer)
+	return CloseAllSQLConnection(a.ctx, a.closer)
 }
 
 // Setup return pointer because it heavily use.
@@ -58,8 +72,11 @@ func (a *DefaultContainerImpl) Close() error {
 // won't let user Close any dependencies during run-time.
 func Setup(ctx context.Context, conf config.Config) (*DefaultContainerImpl, error) {
 	var (
-		appRepo apprepo.Repo
-		closer  = make([]Closer, 0)
+		appRepo          apprepo.Repo
+		FCMServerKeyRepo fcmserverkeyrepo.Repo
+		FCMSvcAccKeyRepo fcmsvcacckeyrepo.Repo
+
+		closer = make([]Closer, 0)
 	)
 
 	dbSQL, dbSQLCloser, err := SQLConnection(ctx, conf.Database)
@@ -70,23 +87,22 @@ func Setup(ctx context.Context, conf config.Config) (*DefaultContainerImpl, erro
 	// don't forget add closer
 	closer = append(closer, dbSQLCloser...)
 
-	appRepoDB, ok := conf.Database[conf.AppRepo.Database]
+	// ===== Prepare App Repository
+	appRepoDriver, ok := conf.Database[conf.AppRepo.Database]
 	if !ok {
 		err = fmt.Errorf("prepare app repository error: unknown database key %s", conf.AppRepo.Database)
 		return nil, err
 	}
 
 	appRepoSQL := dbSQL[conf.AppRepo.Database]
-
-	switch appRepoDB.Driver {
+	switch appRepoDriver.Driver {
 	case "postgres":
 		appRepo, err = apprepo.Postgres(apprepo.RepoPostgresConfig{
 			Connection: appRepoSQL,
 		})
 
 	default:
-		err = fmt.Errorf("prepare app repository error: unknown driver %s", appRepoDB.Driver)
-		return nil, err
+		err = fmt.Errorf("unknown driver %s", appRepoDriver.Driver)
 	}
 
 	if err != nil {
@@ -94,11 +110,59 @@ func Setup(ctx context.Context, conf config.Config) (*DefaultContainerImpl, erro
 		return nil, err
 	}
 
+	// ==== Prepare FCM Server Key Repository
+	FCMServerKeyRepoDriver, ok := conf.Database[conf.FCMServerKeyRepo.Database]
+	if !ok {
+		err = fmt.Errorf("prepare fcm server key repository error: unknown database key %s", conf.FCMServerKeyRepo.Database)
+		return nil, err
+	}
+
+	FCMServerKeyRepoSQL := dbSQL[conf.FCMServiceAccountKeyRepo.Database]
+	switch FCMServerKeyRepoDriver.Driver {
+	case "postgres":
+		FCMServerKeyRepo, err = fcmserverkeyrepo.Postgres(fcmserverkeyrepo.RepoPostgresConfig{
+			Connection: FCMServerKeyRepoSQL,
+		})
+
+	default:
+		err = fmt.Errorf("unknown driver %s", FCMServerKeyRepoDriver.Driver)
+	}
+
+	if err != nil {
+		err = fmt.Errorf("prepare fcm server key repository error: %w", err)
+		return nil, err
+	}
+
+	// ==== Prepare FCM Service Account Key Repository
+	FCMSvcAccKeyRepoDriver, ok := conf.Database[conf.FCMServiceAccountKeyRepo.Database]
+	if !ok {
+		err = fmt.Errorf("prepare fcm service account key repository error: unknown database key %s", conf.FCMServiceAccountKeyRepo.Database)
+		return nil, err
+	}
+
+	FCMSvcAccKeyRepoSQL := dbSQL[conf.FCMServiceAccountKeyRepo.Database]
+	switch FCMSvcAccKeyRepoDriver.Driver {
+	case "postgres":
+		FCMSvcAccKeyRepo, err = fcmsvcacckeyrepo.Postgres(fcmsvcacckeyrepo.RepoPostgresConfig{
+			Connection: FCMSvcAccKeyRepoSQL,
+		})
+
+	default:
+		err = fmt.Errorf("unknown driver %s", FCMSvcAccKeyRepoDriver.Driver)
+	}
+
+	if err != nil {
+		err = fmt.Errorf("prepare fcm service account key repository error: %w", err)
+		return nil, err
+	}
+
 	dep := &DefaultContainerImpl{
-		ctx:     ctx,
-		Config:  conf,
-		AppRepo: appRepo,
-		Closer:  closer,
+		ctx:              ctx,
+		cfg:              conf,
+		appRepo:          appRepo,
+		fcmServerKeyRepo: FCMServerKeyRepo,
+		fcmSvcAccKeyRepo: FCMSvcAccKeyRepo,
+		closer:           closer,
 	}
 
 	err = validator.New().Struct(dep)
@@ -141,7 +205,7 @@ func SQLConnection(ctx context.Context, dbConfigMap config.Database) (map[string
 				return nil, []Closer{}, err
 			}
 
-			// don't forget to register in Closer, using unique name to track in the Log
+			// don't forget to register in closer, using unique name to track in the Log
 			dbSQL[key] = sqlxConn
 			closer = append(closer, NewNamedCloser(key, sqlxConn))
 		}

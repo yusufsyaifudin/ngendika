@@ -34,7 +34,7 @@ func Execute() *cobra.Command {
 
 	// Register flag.FlagSet into "admin" command.
 	// aconfig will parse "flag" tag and register it into flag set
-	// loader := aconfig.LoaderFor(new(config.Config), aconfig.Config{})
+	// loader := aconfig.LoaderFor(new(config.cfg), aconfig.cfg{})
 	// flagSet := loader.Flags()
 	// apiCmd.PersistentFlags().AddGoFlagSet(flagSet)
 
@@ -75,7 +75,9 @@ func Handler(cmd *cobra.Command, args []string) error {
 	zapLog.Debug("~ setting up services")
 	zapLog.Debug("~~ app service")
 	appService, err := appservice.New(appservice.Config{
-		AppRepo: defaultContainer.AppStore(),
+		AppRepo:              defaultContainer.AppRepo(),
+		FCMServerKeyRepo:     defaultContainer.FCMServerKeyRepo(),
+		FCMServiceAccKeyRepo: defaultContainer.FCMServiceAccountKeyRepo(),
 	})
 	if err != nil {
 		err = fmt.Errorf("~~ setting up app service error: %w", err)
@@ -92,9 +94,9 @@ func Handler(cmd *cobra.Command, args []string) error {
 	}
 
 	zapLog.Debug("~~ setting up redis pubsub...")
-	pubSubRedis := make(map[string]queue.IPublisher)
+	pubSubRedis := make(map[string]pubsub.IPublisher)
 	for name, conn := range conf.Redis {
-		ps, err := queue.NewRedis(queue.RedisConfig{
+		ps, err := pubsub.NewRedis(pubsub.RedisConfig{
 			Concurrency: conf.Worker.Num,
 			Mode:        conn.Mode,
 			Address:     conn.Address,
@@ -126,9 +128,11 @@ func Handler(cmd *cobra.Command, args []string) error {
 
 	zapLog.Debug("~~ preparing message service processor")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
-		AppRepo:    defaultContainer.AppStore(),
-		FCMService: fcmClient,
-		RESTClient: resty.New(),
+		AppRepo:              defaultContainer.AppRepo(),
+		FCMServerKeyRepo:     defaultContainer.FCMServerKeyRepo(),
+		FCMServiceAccKeyRepo: defaultContainer.FCMServiceAccountKeyRepo(),
+		FCMClient:            fcmClient,
+		RESTClient:           resty.New(),
 	})
 	if err != nil {
 		err = fmt.Errorf("~~ setting up message service processor error: %w", err)
@@ -140,7 +144,7 @@ func Handler(cmd *cobra.Command, args []string) error {
 	var msgServiceDispatcher msgservice.Service = msgServiceProcessor // default using sync mode unless queue enabled
 
 	if !conf.MsgService.QueueDisable {
-		var pubSubMsgService queue.IPublisher
+		var pubSubMsgService pubsub.IPublisher
 		var ok bool
 		switch conf.MsgService.QueueType {
 		case "redis":

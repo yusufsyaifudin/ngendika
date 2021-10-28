@@ -13,7 +13,7 @@ type Task struct {
 	TraceInfo logger.Tracer `json:"trace_info" validate:"required"`
 	TaskID    string        `json:"task_id" validate:"required"`
 
-	AppClientID             string                   `json:"app_client_id" validate:"required"`
+	ClientID                string                   `json:"client_id" validate:"required"`
 	TaskPayloadFCMMulticast *TaskPayloadFCMMulticast `json:"task_payload_fcm_multicast,omitempty" validate:"required_if=TaskType fcm_multicast"`
 	TaskPayloadFCMLegacy    *TaskPayloadFCMLegacy    `json:"task_payload_fcm_legacy,omitempty" validate:"required_if=TaskType fcm_legacy"`
 	TaskPayloadWebhook      []TaskPayloadWebhook     `json:"task_payload_webhook,omitempty" validate:"dive,required_if=TaskType webhook"`

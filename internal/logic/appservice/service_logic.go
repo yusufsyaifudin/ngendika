@@ -8,19 +8,35 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/satori/uuid"
 	"github.com/yusufsyaifudin/ngendika/storage/apprepo"
+	"github.com/yusufsyaifudin/ngendika/storage/fcmserverkeyrepo"
+	"github.com/yusufsyaifudin/ngendika/storage/fcmsvcacckeyrepo"
 )
 
 type Config struct {
-	AppRepo apprepo.Repo `validate:"required"`
+	AppRepo              apprepo.Repo          `validate:"required"`
+	FCMServerKeyRepo     fcmserverkeyrepo.Repo `validate:"required"`
+	FCMServiceAccKeyRepo fcmsvcacckeyrepo.Repo `validate:"required"`
 }
 
 type DefaultService struct {
 	conf Config
 }
 
+var _ Service = (*DefaultService)(nil)
+
+func New(dep Config) (*DefaultService, error) {
+	if err := validator.New().Struct(dep); err != nil {
+		return nil, err
+	}
+
+	return &DefaultService{
+		conf: dep,
+	}, nil
+}
+
 // CreateApp is a function that knows business logic.
 // It doesn't know whether the input come from HTTP or GRPC or any input.
-func (d *DefaultService) CreateApp(ctx context.Context, input InputCreateApp) (out OutputCreateApp, err error) {
+func (d *DefaultService) CreateApp(ctx context.Context, input CreateAppIn) (out CreateAppOut, err error) {
 
 	appRepo := d.conf.AppRepo
 
@@ -36,7 +52,7 @@ func (d *DefaultService) CreateApp(ctx context.Context, input InputCreateApp) (o
 		return
 	}
 
-	out = OutputCreateApp{
+	out = CreateAppOut{
 		App: App{
 			ClientID:  app.ClientID,
 			Name:      app.Name,
@@ -47,8 +63,15 @@ func (d *DefaultService) CreateApp(ctx context.Context, input InputCreateApp) (o
 	return
 }
 
-func (d *DefaultService) CreateFcmServiceAccountKey(ctx context.Context, input InputCreateFcmServiceAccountKey) (out OutputCreateFcmServiceAccountKey, err error) {
+func (d *DefaultService) CreateFcmSvcAccKey(ctx context.Context, input CreateFcmSvcAccKeyIn) (out CreateFcmSvcAccKeyOut, err error) {
 	appRepo := d.conf.AppRepo
+	fcmSvcAccKeyRepo := d.conf.FCMServiceAccKeyRepo
+
+	err = validator.New().Struct(input)
+	if err != nil {
+		err = fmt.Errorf("validation error, missing required field: %w", err)
+		return
+	}
 
 	app, err := appRepo.GetAppByClientID(ctx, input.ClientID)
 	if err != nil {
@@ -61,39 +84,59 @@ func (d *DefaultService) CreateFcmServiceAccountKey(ctx context.Context, input I
 		return
 	}
 
-	fcmKey := apprepo.FCMServiceAccountKey{
+	fcmKey := fcmsvcacckeyrepo.FCMServiceAccountKey{
 		ID:                uuid.NewV4().String(),
-		AppClientID:       app.ClientID,
+		AppID:             app.ID,
 		ServiceAccountKey: input.FCMServiceAccountKey,
 		CreatedAt:         time.Now().UTC(),
 	}
-	err = validator.New().Struct(fcmKey)
-	if err != nil {
-		err = fmt.Errorf("validation error, missing required field: %w", err)
-		return
-	}
 
-	fcmKey, err = appRepo.CreateFCMServiceAccountKey(ctx, fcmKey)
+	fcmKey, err = fcmSvcAccKeyRepo.CreateFCMServiceAccountKey(ctx, fcmKey)
 	if err != nil {
 		err = fmt.Errorf("failed create new fcm: %w", err)
 		return
 	}
 
-	out = OutputCreateFcmServiceAccountKey{
+	out = CreateFcmSvcAccKeyOut{
 		ServiceAccountKey: fcmKey.ServiceAccountKey,
 		CreatedAt:         fcmKey.CreatedAt,
 	}
 	return
 }
 
-var _ Service = (*DefaultService)(nil)
-
-func New(dep Config) (*DefaultService, error) {
-	if err := validator.New().Struct(dep); err != nil {
-		return nil, err
+func (d *DefaultService) GetFcmSvcAccKey(ctx context.Context, input GetFcmSvcAccKeyIn) (out GetFcmSvcAccKeyOut, err error) {
+	err = validator.New().Struct(input)
+	if err != nil {
+		err = fmt.Errorf("validation error, missing required field: %w", err)
+		return
 	}
 
-	return &DefaultService{
-		conf: dep,
-	}, nil
+	appRepo := d.conf.AppRepo
+	fcmSvcAccKeyRepo := d.conf.FCMServiceAccKeyRepo
+
+	app, err := appRepo.GetAppByClientID(ctx, input.ClientID)
+	if err != nil {
+		err = fmt.Errorf("client id %s not found: %w", input.ClientID, err)
+		return
+	}
+
+	if !app.Enabled {
+		err = fmt.Errorf("client_id %s is disabled", input.ClientID)
+		return
+	}
+
+	keys, err := fcmSvcAccKeyRepo.GetFCMSvcAccKeys(ctx, app.ID)
+	if err != nil {
+		return GetFcmSvcAccKeyOut{}, err
+	}
+
+	out.Lists = make([]GetFcmSvcAccKeyOutList, 0)
+	for _, key := range keys {
+		out.Lists = append(out.Lists, GetFcmSvcAccKeyOutList{
+			ID:                key.ID,
+			ServiceAccountKey: key.ServiceAccountKey,
+		})
+	}
+
+	return
 }

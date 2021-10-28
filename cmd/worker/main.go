@@ -68,9 +68,9 @@ func Handler(cmd *cobra.Command, args []string) error {
 
 	// connect to all redis config
 	zapLog.Debug("~~ setting up redis pubsub...")
-	pubSubRedis := make(map[string]queue.ISubscriber)
+	pubSubRedis := make(map[string]pubsub.ISubscriber)
 	for name, conn := range conf.Redis {
-		subs, err := queue.NewRedis(queue.RedisConfig{
+		subs, err := pubsub.NewRedis(pubsub.RedisConfig{
 			Concurrency: conf.Worker.Num,
 			Mode:        conn.Mode,
 			Address:     conn.Address,
@@ -98,9 +98,11 @@ func Handler(cmd *cobra.Command, args []string) error {
 
 	zapLog.Debug("~~ preparing message service processor")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
-		AppRepo:    defaultContainer.AppStore(),
-		FCMService: fcmClient,
-		RESTClient: resty.New(),
+		AppRepo:              defaultContainer.AppRepo(),
+		FCMServerKeyRepo:     defaultContainer.FCMServerKeyRepo(),
+		FCMServiceAccKeyRepo: defaultContainer.FCMServiceAccountKeyRepo(),
+		FCMClient:            fcmClient,
+		RESTClient:           resty.New().SetDebug(true),
 	})
 	if err != nil {
 		err = fmt.Errorf("~~ setting up message service processor error: %w", err)
@@ -118,7 +120,7 @@ func Handler(cmd *cobra.Command, args []string) error {
 		}
 
 		// only subscribe when queue type and identifier is match
-		subs.Subscribe(context.Background(), func(ctx context.Context, msg *queue.Message) error {
+		subs.Subscribe(context.Background(), func(ctx context.Context, msg *pubsub.Message) error {
 			var task *msgservice.Task
 			err := json.Unmarshal(msg.Body, &task)
 			if err != nil {

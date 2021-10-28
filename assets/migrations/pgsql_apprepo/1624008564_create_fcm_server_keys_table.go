@@ -44,16 +44,13 @@ func (m CreateFcmServerKeysTable1624008564) Up(ctx context.Context) (sql string,
 	sql = `
 CREATE TABLE IF NOT EXISTS fcm_server_keys (
 	id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
-	app_client_id VARCHAR NOT NULL,
+	app_id UUID NOT NULL,
 	server_key VARCHAR NOT NULL,
-	created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-
-	-- data integrity
-	CONSTRAINT fk_fcm_server_keys_app_client_id FOREIGN KEY(app_client_id) REFERENCES apps(client_id) ON DELETE CASCADE
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 -- for faster query WHERE app_client_id = ? ORDER BY created_at DESC
-CREATE INDEX idx_fcm_server_keys_app_id_created_at ON fcm_server_keys (app_client_id, created_at DESC);
+CREATE INDEX idx_fcm_server_keys_app_id_created_at ON fcm_server_keys (app_id, created_at DESC);
 `
 
 	return

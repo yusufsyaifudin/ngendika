@@ -9,7 +9,7 @@ import (
 )
 
 type DispatcherConfig struct {
-	Publisher queue.IPublisher `validate:"required"`
+	Publisher pubsub.IPublisher `validate:"required"`
 }
 
 type Dispatcher struct {
@@ -38,7 +38,7 @@ func (d *Dispatcher) Process(ctx context.Context, task *Task) (out *TaskResult, 
 		return
 	}
 
-	err = d.Config.Publisher.Publish(ctx, &queue.Message{
+	err = d.Config.Publisher.Publish(ctx, &pubsub.Message{
 		Body: data,
 	})
 
@@ -49,7 +49,7 @@ func (d *Dispatcher) Process(ctx context.Context, task *Task) (out *TaskResult, 
 	// build result
 	out = &TaskResult{
 		TaskID:      task.TaskID,
-		AppClientID: task.AppClientID,
+		AppClientID: task.ClientID,
 	}
 	return
 }
