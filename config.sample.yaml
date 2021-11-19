@@ -58,6 +58,8 @@ msgRepo:
   cacheKeyPrefix: msgStore
   redis: redis1 # refer to redis
 
+
+## service
 msgService:
   queueDisable: false # if true, then use sync mode only
   queueType: redis # redis

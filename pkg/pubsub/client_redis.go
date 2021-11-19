@@ -7,18 +7,13 @@ import (
 	"fmt"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/go-redis/redis/v8"
 	"github.com/hibiken/asynq"
 )
 
 type RedisConfig struct {
-	Concurrency int `yaml:"concurrency" validate:"required"`
-
-	Mode       string   `yaml:"mode" validate:"required,oneof=single sentinel cluster"`
-	Address    []string `yaml:"address" validate:"required,unique,dive,required"`
-	Username   string   `yaml:"username" validate:"-"`
-	Password   string   `yaml:"password" validate:"-"`
-	DB         int      `yaml:"db" validate:"-"`
-	MasterName string   `yaml:"master_name" validate:"required_if=Mode sentinel"`
+	Concurrency int                   `validate:"required"`
+	RedisClient redis.UniversalClient ` validate:"required"`
 }
 
 type Redis struct {
@@ -36,22 +31,15 @@ func NewRedis(conf RedisConfig) (*Redis, error) {
 		return nil, err
 	}
 
-	client := RedisClusterClientOpt{
-		Mode:       conf.Mode,
-		Address:    conf.Address,
-		Username:   conf.Username,
-		Password:   conf.Password,
-		DB:         conf.DB,
-		MasterName: conf.MasterName,
+	client := &redisUniversalClient{
+		conn: conf.RedisClient,
 	}
 
 	publisher := asynq.NewClient(client)
 	subscriber := asynq.NewServer(client, asynq.Config{
-		// Specify how many concurrent workers to use
-		Concurrency:    conf.Concurrency,
-		RetryDelayFunc: nil,
-		// Optionally specify multiple queues with different priority.
-		Queues: map[string]int{
+		Concurrency:    conf.Concurrency,            // Specify how many concurrent workers to use
+		RetryDelayFunc: asynq.DefaultRetryDelayFunc, // Function to calculate retry delay for a failed task.
+		Queues: map[string]int{ // Optionally specify multiple queues with different priority.
 			"critical": 6,
 			"default":  3,
 			"low":      1,
@@ -108,4 +96,14 @@ func (r *Redis) Shutdown(ctx context.Context) (err error) {
 	r.subscriber.Stop()
 	r.subscriber.Shutdown()
 	return r.publisher.Close()
+}
+
+// --- helper
+
+type redisUniversalClient struct {
+	conn redis.UniversalClient
+}
+
+func (r *redisUniversalClient) MakeRedisClient() interface{} {
+	return r.conn
 }

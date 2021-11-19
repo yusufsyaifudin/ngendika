@@ -10,6 +10,12 @@ import (
 	"github.com/yusufsyaifudin/ngendika/storage"
 )
 
+const (
+	sqlCreateApp = `INSERT INTO apps (client_id, name, enabled, created_at) VALUES ($1, $2, $3, $4) RETURNING *;`
+
+	sqlGetAppByClientID = `SELECT * FROM apps WHERE LOWER(client_id) = $1 LIMIT 1;`
+)
+
 type RepoPostgresConfig struct {
 	Connection sqlx.QueryerContext `validate:"required"`
 }

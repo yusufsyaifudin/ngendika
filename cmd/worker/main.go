@@ -58,6 +58,25 @@ func Handler(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	zapLog.Debug("~ injecting dependencies")
+	zapLog.Debug("~~ preparing app repo")
+	appRepo, err := defaultContainer.AppRepo()
+	if err != nil {
+		return err
+	}
+
+	zapLog.Debug("~~ preparing fcm server key repo")
+	fcmServerKeyRepo, err := defaultContainer.FCMServerKeyRepo()
+	if err != nil {
+		return err
+	}
+
+	zapLog.Debug("~~ preparing fcm service account key app repo")
+	fcmSvcAccKeyRepo, err := defaultContainer.FCMServiceAccountKeyRepo()
+	if err != nil {
+		return err
+	}
+
 	zapLog.Debug("~~ fcm client")
 	fcmClient, err := fcm.NewClient()
 	if err != nil {
@@ -66,41 +85,11 @@ func Handler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// connect to all redis config
-	zapLog.Debug("~~ setting up redis pubsub...")
-	pubSubRedis := make(map[string]pubsub.ISubscriber)
-	for name, conn := range conf.Redis {
-		subs, err := pubsub.NewRedis(pubsub.RedisConfig{
-			Concurrency: conf.Worker.Num,
-			Mode:        conn.Mode,
-			Address:     conn.Address,
-			Username:    conn.Username,
-			Password:    conn.Password,
-			DB:          conn.DB,
-			MasterName:  conn.MasterName,
-		})
-
-		if err != nil {
-			err = fmt.Errorf("connect redis %s for pubsub error: %w", name, err)
-			return err
-		}
-
-		pubSubRedis[name] = subs
-	}
-
-	defer func() {
-		for s, publisher := range pubSubRedis {
-			if _err := publisher.Shutdown(context.Background()); _err != nil {
-				zapLog.Error("error shutdown redis pubsub", zap.String("name", s), zap.Error(_err))
-			}
-		}
-	}()
-
 	zapLog.Debug("~~ preparing message service processor")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
-		AppRepo:              defaultContainer.AppRepo(),
-		FCMServerKeyRepo:     defaultContainer.FCMServerKeyRepo(),
-		FCMServiceAccKeyRepo: defaultContainer.FCMServiceAccountKeyRepo(),
+		AppRepo:              appRepo,
+		FCMServerKeyRepo:     fcmServerKeyRepo,
+		FCMServiceAccKeyRepo: fcmSvcAccKeyRepo,
 		FCMClient:            fcmClient,
 		RESTClient:           resty.New().SetDebug(true),
 	})
@@ -110,27 +99,45 @@ func Handler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	for name, subs := range pubSubRedis {
-		if conf.Worker.QueueType != "redis" {
-			continue
-		}
-
-		if name != conf.Worker.QueueIdentifier {
-			continue
-		}
-
-		// only subscribe when queue type and identifier is match
-		subs.Subscribe(context.Background(), func(ctx context.Context, msg *pubsub.Message) error {
-			var task *msgservice.Task
-			err := json.Unmarshal(msg.Body, &task)
-			if err != nil {
-				return err
-			}
-
-			_, err = msgServiceProcessor.Process(ctx, task)
+	var pubsubWorker pubsub.ISubscriber
+	switch conf.Worker.QueueType {
+	case "redis":
+		redisConn, err := defaultContainer.GetRedisConn(conf.Worker.QueueIdentifier)
+		if err != nil {
+			err = fmt.Errorf("pubsub with type redis: %s get connection error: %w", err)
 			return err
+		}
+
+		pubsubWorker, err = pubsub.NewRedis(pubsub.RedisConfig{
+			Concurrency: conf.Worker.Num,
+			RedisClient: redisConn,
 		})
 	}
+
+	if err != nil {
+		err = fmt.Errorf("pubsub with type %s: %s error: %w",
+			conf.Worker.QueueType, conf.MsgService.QueueIdentifier, err,
+		)
+		return err
+	}
+
+	defer func() {
+		if _err := pubsubWorker.Shutdown(ctx); _err != nil {
+			logger.Error(ctx, "error shutdown pubsub with redis", logger.KV("error", _err))
+		}
+	}()
+
+	// only subscribe when queue type and identifier is match
+	pubsubWorker.Subscribe(context.Background(), func(ctx context.Context, msg *pubsub.Message) error {
+		var task *msgservice.Task
+		err := json.Unmarshal(msg.Body, &task)
+		if err != nil {
+			return err
+		}
+
+		_, err = msgServiceProcessor.Process(ctx, task)
+		return err
+	})
 
 	return nil
 }

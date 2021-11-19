@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yusufsyaifudin/ngendika/cmd/api"
-	"github.com/yusufsyaifudin/ngendika/cmd/migrate"
-	"github.com/yusufsyaifudin/ngendika/cmd/worker"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
+	"github.com/yusufsyaifudin/ngendika/cmd/api"
+	"github.com/yusufsyaifudin/ngendika/cmd/worker"
 )
 
 var _rootCmd = &cobra.Command{
@@ -20,7 +18,6 @@ var _rootCmd = &cobra.Command{
 // init register all sub-command. This way, we can generate docs for all sub-command.
 func init() {
 	_rootCmd.AddCommand(api.Execute())
-	_rootCmd.AddCommand(migrate.Execute())
 	_rootCmd.AddCommand(worker.Execute())
 	_rootCmd.AddCommand(GenerateDocCmd())
 }

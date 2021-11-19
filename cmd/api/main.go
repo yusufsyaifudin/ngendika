@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -72,12 +71,32 @@ func Handler(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	zapLog.Debug("~ injecting dependencies")
+	zapLog.Debug("~~ preparing app repo")
+	appRepo, err := defaultContainer.AppRepo()
+	if err != nil {
+		return err
+	}
+
+	zapLog.Debug("~~ preparing fcm server key repo")
+	fcmServerKeyRepo, err := defaultContainer.FCMServerKeyRepo()
+	if err != nil {
+		return err
+	}
+
+	zapLog.Debug("~~ preparing fcm service account key app repo")
+	fcmSvcAccKeyRepo, err := defaultContainer.FCMServiceAccountKeyRepo()
+	if err != nil {
+		return err
+	}
+
 	zapLog.Debug("~ setting up services")
 	zapLog.Debug("~~ app service")
+
 	appService, err := appservice.New(appservice.Config{
-		AppRepo:              defaultContainer.AppRepo(),
-		FCMServerKeyRepo:     defaultContainer.FCMServerKeyRepo(),
-		FCMServiceAccKeyRepo: defaultContainer.FCMServiceAccountKeyRepo(),
+		AppRepo:              appRepo,
+		FCMServerKeyRepo:     fcmServerKeyRepo,
+		FCMServiceAccKeyRepo: fcmSvcAccKeyRepo,
 	})
 	if err != nil {
 		err = fmt.Errorf("~~ setting up app service error: %w", err)
@@ -93,44 +112,15 @@ func Handler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	zapLog.Debug("~~ setting up redis pubsub...")
-	pubSubRedis := make(map[string]pubsub.IPublisher)
-	for name, conn := range conf.Redis {
-		ps, err := pubsub.NewRedis(pubsub.RedisConfig{
-			Concurrency: conf.Worker.Num,
-			Mode:        conn.Mode,
-			Address:     conn.Address,
-			Username:    conn.Username,
-			Password:    conn.Password,
-			DB:          conn.DB,
-			MasterName:  conn.MasterName,
-		})
-
-		if err != nil {
-			err = fmt.Errorf("connect redis %s for pubsub error: %w", name, err)
-			return err
-		}
-
-		pubSubRedis[name] = ps
-	}
-
-	defer func() {
-		for s, publisher := range pubSubRedis {
-			if _err := publisher.Shutdown(context.Background()); _err != nil {
-				zapLog.Error("error shutdown redis pubsub", zap.String("name", s), zap.Error(_err))
-			}
-		}
-	}()
-
 	uuidFunc := sonyflake.NewSonyflake(sonyflake.Settings{
 		StartTime: time.Date(2021, 6, 28, 00, 00, 00, 00, time.UTC),
 	})
 
 	zapLog.Debug("~~ preparing message service processor")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
-		AppRepo:              defaultContainer.AppRepo(),
-		FCMServerKeyRepo:     defaultContainer.FCMServerKeyRepo(),
-		FCMServiceAccKeyRepo: defaultContainer.FCMServiceAccountKeyRepo(),
+		AppRepo:              appRepo,
+		FCMServerKeyRepo:     fcmServerKeyRepo,
+		FCMServiceAccKeyRepo: fcmSvcAccKeyRepo,
 		FCMClient:            fcmClient,
 		RESTClient:           resty.New(),
 	})
@@ -145,15 +135,29 @@ func Handler(cmd *cobra.Command, args []string) error {
 
 	if !conf.MsgService.QueueDisable {
 		var pubSubMsgService pubsub.IPublisher
-		var ok bool
 		switch conf.MsgService.QueueType {
 		case "redis":
-			pubSubMsgService, ok = pubSubRedis[conf.MsgService.QueueIdentifier]
-			if !ok {
-				err = fmt.Errorf("pubsub with type redis: %s for message service is not found", conf.MsgService.QueueIdentifier)
+			redisConn, err := defaultContainer.GetRedisConn(conf.MsgService.QueueIdentifier)
+			if err != nil {
+				err = fmt.Errorf("pubsub with type redis: %s get connection error: %w", err)
 				return err
 			}
 
+			pubSubMsgService, err = pubsub.NewRedis(pubsub.RedisConfig{
+				Concurrency: conf.Worker.Num,
+				RedisClient: redisConn,
+			})
+
+			if err != nil {
+				err = fmt.Errorf("pubsub with type redis: %s error: %w", conf.MsgService.QueueIdentifier, err)
+				return err
+			}
+
+			defer func() {
+				if _err := pubSubMsgService.Shutdown(ctx); _err != nil {
+					logger.Error(ctx, "error shutdown pubsub with redis", logger.KV("error", _err))
+				}
+			}()
 		default:
 			err = fmt.Errorf("pubsub with type %s is unknown", conf.MsgService.QueueType)
 			return err
