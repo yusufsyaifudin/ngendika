@@ -9,16 +9,14 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/go-resty/resty/v2"
 	"github.com/segmentio/encoding/json"
+	"github.com/yusufsyaifudin/ngendika/internal/storage/apprepo"
+	"github.com/yusufsyaifudin/ngendika/internal/storage/fcmrepo"
 	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
-	"github.com/yusufsyaifudin/ngendika/storage/apprepo"
-	"github.com/yusufsyaifudin/ngendika/storage/fcmserverkeyrepo"
-	"github.com/yusufsyaifudin/ngendika/storage/fcmsvcacckeyrepo"
 )
 
 type ProcessorConfig struct {
-	AppRepo              apprepo.Repo          `validate:"required"`
-	FCMServerKeyRepo     fcmserverkeyrepo.Repo `validate:"required"`
-	FCMServiceAccKeyRepo fcmsvcacckeyrepo.Repo `validate:"required"`
+	AppRepo apprepo.Repo `validate:"required"`
+	FCMRepo fcmrepo.Repo `validate:"required"`
 
 	FCMClient  fcm.Client    `validate:"required"`
 	RESTClient *resty.Client `validate:"required"`
@@ -41,80 +39,86 @@ func NewProcessor(conf ProcessorConfig) (*Processor, error) {
 	}, nil
 }
 
-func (p *Processor) Process(ctx context.Context, task *Task) (out *TaskResult, err error) {
-	appRepo := p.Config.AppRepo
+func (p *Processor) Process() Process {
+	return func(ctx context.Context, task *Task) (out *TaskResult, err error) {
+		appRepo := p.Config.AppRepo
 
-	err = validator.New().Struct(task)
-	if err != nil {
+		if task.Message == nil {
+			task.Message = &Message{}
+		}
+
+		err = validator.New().Struct(task)
+		if err != nil {
+			return
+		}
+
+		app, err := appRepo.GetAppByClientID(ctx, task.ClientID)
+		if err != nil {
+			err = fmt.Errorf("client id %s not found: %w", task.ClientID, err)
+			return
+		}
+
+		if !app.Enabled {
+			err = fmt.Errorf("app %s is diabled", app.ClientID)
+			return
+		}
+
+		var (
+			outFCMMulticast    *FCMMulticastOutput
+			outFCMMulticastErr error
+			outFCMLegacy       *FCMLegacyOutput
+			outFCMLegacyErr    error
+			outWebhook         *WebhookOutput
+			outWebhookErr      error
+		)
+
+		// perform task on each payload
+		wg := sync.WaitGroup{}
+		wg.Add(3)
+
+		go func() {
+			defer wg.Done()
+
+			outFCMMulticast, outFCMMulticastErr = p.FcmMulticast(ctx, &FcmMulticastInput{
+				AppID:   app.ID,
+				Payload: task.Message.FCMMulticast,
+			})
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			outFCMLegacy, outFCMLegacyErr = p.FcmLegacy(ctx, &FcmLegacyInput{
+				AppID:   app.ID,
+				Payload: task.Message.FCMLegacy,
+			})
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
+				AppClientID: app.ID,
+				Webhook:     task.Message.Webhook,
+			})
+		}()
+
+		// wait for all go routine to succeed
+		wg.Wait()
+
+		out = &TaskResult{
+			TaskID:            task.TaskID,
+			AppClientID:       task.ClientID,
+			FCMMulticast:      outFCMMulticast,
+			FCMMulticastError: ErrorString(outFCMMulticastErr),
+			FCMLegacy:         outFCMLegacy,
+			FCMLegacyError:    ErrorString(outFCMLegacyErr),
+			Webhook:           outWebhook,
+			WebhookError:      ErrorString(outWebhookErr),
+		}
+
 		return
 	}
-
-	app, err := appRepo.GetAppByClientID(ctx, task.ClientID)
-	if err != nil {
-		err = fmt.Errorf("client id %s not found: %w", task.ClientID, err)
-		return
-	}
-
-	if !app.Enabled {
-		err = fmt.Errorf("app %s is diabled", app.ClientID)
-		return
-	}
-
-	var (
-		outFCMMulticast    *FCMMulticastOutput
-		outFCMMulticastErr error
-		outFCMLegacy       *FCMLegacyOutput
-		outFCMLegacyErr    error
-		outWebhook         *WebhookOutput
-		outWebhookErr      error
-	)
-
-	// perform task on each payload
-	wg := sync.WaitGroup{}
-	wg.Add(3)
-
-	go func() {
-		defer wg.Done()
-
-		outFCMMulticast, outFCMMulticastErr = p.FcmMulticast(ctx, &FcmMulticastInput{
-			AppID:                   app.ID,
-			TaskPayloadFCMMulticast: task.TaskPayloadFCMMulticast,
-		})
-	}()
-
-	go func() {
-		defer wg.Done()
-
-		outFCMLegacy, outFCMLegacyErr = p.FcmLegacy(ctx, &FcmLegacyInput{
-			AppID:                app.ID,
-			TaskPayloadFCMLegacy: task.TaskPayloadFCMLegacy,
-		})
-	}()
-
-	go func() {
-		defer wg.Done()
-
-		outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
-			AppClientID: app.ID,
-			Webhook:     task.TaskPayloadWebhook,
-		})
-	}()
-
-	// wait for all go routine to succeed
-	wg.Wait()
-
-	out = &TaskResult{
-		TaskID:            task.TaskID,
-		AppClientID:       task.ClientID,
-		FCMMulticast:      outFCMMulticast,
-		FCMMulticastError: ErrorString(outFCMMulticastErr),
-		FCMLegacy:         outFCMLegacy,
-		FCMLegacyError:    ErrorString(outFCMLegacyErr),
-		Webhook:           outWebhook,
-		WebhookError:      ErrorString(outWebhookErr),
-	}
-
-	return
 }
 
 func (p *Processor) FcmMulticast(ctx context.Context, input *FcmMulticastInput) (out *FCMMulticastOutput, err error) {
@@ -127,9 +131,9 @@ func (p *Processor) FcmMulticast(ctx context.Context, input *FcmMulticastInput) 
 		return
 	}
 
-	fcmSvcAccKeyRepo := p.Config.FCMServiceAccKeyRepo
+	fcmSvcAccKeyRepo := p.Config.FCMRepo.FCMServiceAccountKey()
 
-	serviceAccountKeys, err := fcmSvcAccKeyRepo.GetFCMSvcAccKeys(ctx, input.AppID)
+	serviceAccountKeys, err := fcmSvcAccKeyRepo.FetchAll(ctx, input.AppID)
 	if err != nil {
 		err = fmt.Errorf("error get fcm service account key: %w", err)
 		return
@@ -148,7 +152,7 @@ func (p *Processor) FcmMulticast(ctx context.Context, input *FcmMulticastInput) 
 			continue
 		}
 
-		batchRes, err := p.Config.FCMClient.SendMulticast(ctx, key, input.TaskPayloadFCMMulticast.Msg)
+		batchRes, err := p.Config.FCMClient.SendMulticast(ctx, key, input.Payload)
 		if err != nil {
 			multicastRes = append(multicastRes, FCMMulticastResult{
 				FCMKeyID: serviceAccountKey.ID,
@@ -181,9 +185,9 @@ func (p *Processor) FcmLegacy(ctx context.Context, input *FcmLegacyInput) (out *
 		return
 	}
 
-	fcmServerKey := p.Config.FCMServerKeyRepo
+	fcmServerKey := p.Config.FCMRepo.FCMServerKey()
 
-	serverKeys, err := fcmServerKey.GetFCMServerKeys(ctx, input.AppID)
+	serverKeys, err := fcmServerKey.FetchAll(ctx, input.AppID)
 	if err != nil {
 		err = fmt.Errorf("error get fcm service acoount key: %w", err)
 		return
@@ -193,7 +197,7 @@ func (p *Processor) FcmLegacy(ctx context.Context, input *FcmLegacyInput) (out *
 
 	for _, key := range serverKeys {
 
-		batchRes, err := p.Config.FCMClient.SendLegacy(ctx, key.ServerKey, input.TaskPayloadFCMLegacy.Msg)
+		batchRes, err := p.Config.FCMClient.SendLegacy(ctx, key.ServerKey, input.Payload)
 		if err != nil {
 			legacyResp = append(legacyResp, FCMLegacyResult{
 				FCMKeyID: key.ID,

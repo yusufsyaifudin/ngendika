@@ -7,15 +7,13 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/satori/uuid"
-	"github.com/yusufsyaifudin/ngendika/storage/apprepo"
-	"github.com/yusufsyaifudin/ngendika/storage/fcmserverkeyrepo"
-	"github.com/yusufsyaifudin/ngendika/storage/fcmsvcacckeyrepo"
+	"github.com/yusufsyaifudin/ngendika/internal/storage/apprepo"
+	"github.com/yusufsyaifudin/ngendika/internal/storage/fcmrepo"
 )
 
 type Config struct {
-	AppRepo              apprepo.Repo          `validate:"required"`
-	FCMServerKeyRepo     fcmserverkeyrepo.Repo `validate:"required"`
-	FCMServiceAccKeyRepo fcmsvcacckeyrepo.Repo `validate:"required"`
+	AppRepo apprepo.Repo `validate:"required"`
+	FCMRepo fcmrepo.Repo `validate:"required"`
 }
 
 type DefaultService struct {
@@ -65,7 +63,7 @@ func (d *DefaultService) CreateApp(ctx context.Context, input CreateAppIn) (out 
 
 func (d *DefaultService) CreateFcmSvcAccKey(ctx context.Context, input CreateFcmSvcAccKeyIn) (out CreateFcmSvcAccKeyOut, err error) {
 	appRepo := d.conf.AppRepo
-	fcmSvcAccKeyRepo := d.conf.FCMServiceAccKeyRepo
+	fcmSvcAccKeyRepo := d.conf.FCMRepo.FCMServiceAccountKey()
 
 	err = validator.New().Struct(input)
 	if err != nil {
@@ -84,14 +82,14 @@ func (d *DefaultService) CreateFcmSvcAccKey(ctx context.Context, input CreateFcm
 		return
 	}
 
-	fcmKey := fcmsvcacckeyrepo.FCMServiceAccountKey{
+	fcmKey := fcmrepo.FCMServiceAccountKey{
 		ID:                uuid.NewV4().String(),
 		AppID:             app.ID,
 		ServiceAccountKey: input.FCMServiceAccountKey,
 		CreatedAt:         time.Now().UTC(),
 	}
 
-	fcmKey, err = fcmSvcAccKeyRepo.CreateFCMServiceAccountKey(ctx, fcmKey)
+	fcmKey, err = fcmSvcAccKeyRepo.Create(ctx, fcmKey)
 	if err != nil {
 		err = fmt.Errorf("failed create new fcm: %w", err)
 		return
@@ -112,7 +110,7 @@ func (d *DefaultService) GetFcmSvcAccKey(ctx context.Context, input GetFcmSvcAcc
 	}
 
 	appRepo := d.conf.AppRepo
-	fcmSvcAccKeyRepo := d.conf.FCMServiceAccKeyRepo
+	fcmSvcAccKeyRepo := d.conf.FCMRepo.FCMServiceAccountKey()
 
 	app, err := appRepo.GetAppByClientID(ctx, input.ClientID)
 	if err != nil {
@@ -125,7 +123,7 @@ func (d *DefaultService) GetFcmSvcAccKey(ctx context.Context, input GetFcmSvcAcc
 		return
 	}
 
-	keys, err := fcmSvcAccKeyRepo.GetFCMSvcAccKeys(ctx, app.ID)
+	keys, err := fcmSvcAccKeyRepo.FetchAll(ctx, app.ID)
 	if err != nil {
 		return GetFcmSvcAccKeyOut{}, err
 	}

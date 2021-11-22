@@ -12,21 +12,14 @@ import (
 type Task struct {
 	TraceInfo logger.Tracer `json:"trace_info" validate:"required"`
 	TaskID    string        `json:"task_id" validate:"required"`
-
-	ClientID                string                   `json:"client_id" validate:"required"`
-	TaskPayloadFCMMulticast *TaskPayloadFCMMulticast `json:"task_payload_fcm_multicast,omitempty" validate:"required_if=TaskType fcm_multicast"`
-	TaskPayloadFCMLegacy    *TaskPayloadFCMLegacy    `json:"task_payload_fcm_legacy,omitempty" validate:"required_if=TaskType fcm_legacy"`
-	TaskPayloadWebhook      []TaskPayloadWebhook     `json:"task_payload_webhook,omitempty" validate:"dive,required_if=TaskType webhook"`
+	ClientID  string        `json:"client_id" validate:"required"`
+	Message   *Message      `json:"message" validate:"required"`
 }
 
-// TaskPayloadFCMMulticast is FCM message to send with mode multicast
-type TaskPayloadFCMMulticast struct {
-	Msg *fcm.MulticastMessage `json:"msg" validate:"required"`
-}
-
-// TaskPayloadFCMLegacy is FCM message to send with mode legacy API
-type TaskPayloadFCMLegacy struct {
-	Msg *fcm.LegacyMessage `json:"msg" validate:"required"`
+type Message struct {
+	FCMMulticast *fcm.MulticastMessage `json:"fcm_multicast" validate:"-"`
+	FCMLegacy    *fcm.LegacyMessage    `json:"fcm_legacy" validate:"-"`
+	Webhook      []TaskPayloadWebhook  `json:"webhook" validate:"-"`
 }
 
 // TaskPayloadWebhook is a task to call external service.

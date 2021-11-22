@@ -47,15 +47,10 @@ type Config struct {
 		Cache    bool   `yaml:"cache"`
 	} `yaml:"appRepo" flag:"appRepo"`
 
-	FCMServerKeyRepo struct {
+	FCMRepo struct {
 		Database string `yaml:"database"`
 		Cache    bool   `yaml:"cache"`
-	} `yaml:"FCMServerKeyRepo" flag:"FCMServerKeyRepo"`
-
-	FCMServiceAccountKeyRepo struct {
-		Database string `yaml:"database"`
-		Cache    bool   `yaml:"cache"`
-	} `yaml:"FCMServiceAccountKeyRepo" flag:"FCMServiceAccountKeyRepo"`
+	} `yaml:"fcmRepo" flag:"fcmRepo"`
 
 	MsgRepo struct {
 		Database string `yaml:"database"`

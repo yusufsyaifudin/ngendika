@@ -6,12 +6,10 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
-	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
 )
 
 type ConfigAppService struct {
-	Logger              logger.Logger                `validate:"required"`
 	ResponseConstructor response.HTTPRespConstructor `validate:"required"`
 	ResponseWriter      response.Writer              `validate:"required"`
 	AppService          appservice.Service           `validate:"required"`

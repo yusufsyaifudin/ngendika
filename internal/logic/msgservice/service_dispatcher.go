@@ -27,29 +27,31 @@ func NewDispatcher(conf DispatcherConfig) (*Dispatcher, error) {
 	return &Dispatcher{Config: conf}, nil
 }
 
-func (d *Dispatcher) Process(ctx context.Context, task *Task) (out *TaskResult, err error) {
-	err = validator.New().Struct(task)
-	if err != nil {
+func (d *Dispatcher) Process() Process {
+	return func(ctx context.Context, task *Task) (out *TaskResult, err error) {
+		err = validator.New().Struct(task)
+		if err != nil {
+			return
+		}
+
+		data, err := json.Marshal(task)
+		if err != nil {
+			return
+		}
+
+		err = d.Config.Publisher.Publish(ctx, &pubsub.Message{
+			Body: data,
+		})
+
+		if err != nil {
+			return
+		}
+
+		// build result
+		out = &TaskResult{
+			TaskID:      task.TaskID,
+			AppClientID: task.ClientID,
+		}
 		return
 	}
-
-	data, err := json.Marshal(task)
-	if err != nil {
-		return
-	}
-
-	err = d.Config.Publisher.Publish(ctx, &pubsub.Message{
-		Body: data,
-	})
-
-	if err != nil {
-		return
-	}
-
-	// build result
-	out = &TaskResult{
-		TaskID:      task.TaskID,
-		AppClientID: task.ClientID,
-	}
-	return
 }

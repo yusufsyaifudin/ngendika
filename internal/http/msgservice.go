@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -14,7 +13,6 @@ import (
 )
 
 type HandlerMessageService struct {
-	Logger               logger.Logger                `validate:"required"`
 	UID                  uid.UID                      `validate:"required"`
 	ResponseConstructor  response.HTTPRespConstructor `validate:"required"`
 	ResponseWriter       response.Writer              `validate:"required"`
@@ -48,18 +46,10 @@ func (h *HandlerMessageService) SendMessage(w http.ResponseWriter, r *http.Reque
 
 	var taskResult *msgservice.TaskResult
 
-	var msgServiceProcess func(ctx context.Context, task *msgservice.Task) (out *msgservice.TaskResult, err error)
-	msgServiceProcess = h.MsgServiceDispatcher.Process
+	var msgServiceProcess msgservice.Process
+	msgServiceProcess = h.MsgServiceDispatcher.Process()
 	if reqBody.Sync {
-		msgServiceProcess = h.MsgServiceProcessor.Process
-	}
-
-	fcmMulticast := &msgservice.TaskPayloadFCMMulticast{
-		Msg: reqBody.FCMMulticast,
-	}
-
-	fcmLegacy := &msgservice.TaskPayloadFCMLegacy{
-		Msg: reqBody.FCMLegacy,
+		msgServiceProcess = h.MsgServiceProcessor.Process()
 	}
 
 	uuid, err := h.UID.NextID()
@@ -68,12 +58,14 @@ func (h *HandlerMessageService) SendMessage(w http.ResponseWriter, r *http.Reque
 	}
 
 	taskResult, err = msgServiceProcess(ctx, &msgservice.Task{
-		TraceInfo:               logger.MustExtract(ctx),
-		TaskID:                  fmt.Sprint(uuid),
-		ClientID:                reqBody.ClientID,
-		TaskPayloadFCMMulticast: fcmMulticast,
-		TaskPayloadFCMLegacy:    fcmLegacy,
-		TaskPayloadWebhook:      reqBody.Webhook,
+		TraceInfo: logger.MustExtract(ctx),
+		TaskID:    fmt.Sprint(uuid),
+		ClientID:  reqBody.ClientID,
+		Message: &msgservice.Message{
+			FCMMulticast: reqBody.FCMMulticast,
+			FCMLegacy:    reqBody.FCMLegacy,
+			Webhook:      reqBody.Webhook,
+		},
 	})
 
 	if err != nil {

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"go.uber.org/multierr"
 )
 
 var (
@@ -85,10 +88,12 @@ func (w *Worker) worker(id int) {
 					continue
 				}
 
+				t0 := time.Now()
 				var _err error
 				_err = job.PreExecute()
 				if _err != nil {
-					job.PostExecute(fmt.Errorf("%w: %s", ErrPreExecute, _err))
+					_err = multierr.Append(_err, ErrPreExecute)
+					job.PostExecute(_err)
 					atomic.AddInt64(&w.JobQueueNum, -1)
 					w.waitGroup.Done()
 					continue
@@ -96,7 +101,7 @@ func (w *Worker) worker(id int) {
 
 				_err = job.Execute()
 				if _err != nil {
-					_err = fmt.Errorf("%w: %s", ErrExecute, _err)
+					_err = multierr.Append(_err, ErrExecute)
 				}
 
 				job.PostExecute(_err)
@@ -105,7 +110,9 @@ func (w *Worker) worker(id int) {
 
 				w.Logger.Info(
 					job.Context(),
-					fmt.Sprintf("worker %d, job id %d, ongoing queue %d", id, job.ID(), atomic.LoadInt64(&w.JobQueueNum)),
+					fmt.Sprintf("worker %d, job id %d, ongoing queue %d, duration %s",
+						id, job.ID(), atomic.LoadInt64(&w.JobQueueNum), time.Since(t0).String(),
+					),
 				)
 
 			case <-w.Stop:

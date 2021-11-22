@@ -1,10 +1,42 @@
-package fcmsvcacckeyrepo
+package fcmrepo
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
+
+var (
+	ErrValidation = errors.New("validation error")
+)
+
+// RepoFCMServerKey .
+type RepoFCMServerKey interface {
+	Create(ctx context.Context, param FCMServerKey) (inserted FCMServerKey, err error)
+	FetchAll(ctx context.Context, appID string) (serverKeys []FCMServerKey, err error)
+}
+
+// RepoFCMServiceAccountKey .
+type RepoFCMServiceAccountKey interface {
+	Create(ctx context.Context, cert FCMServiceAccountKey) (inserted FCMServiceAccountKey, err error)
+	FetchAll(ctx context.Context, appID string) (fcmServiceAccountKeys []FCMServiceAccountKey, err error)
+}
+
+// Repo .
+type Repo interface {
+	FCMServerKey() RepoFCMServerKey
+	FCMServiceAccountKey() RepoFCMServiceAccountKey
+}
+
+// FCMServerKey is FCM server key structure
+type FCMServerKey struct {
+	ID        string    `json:"id" db:"id" validate:"required,uuid"`
+	AppID     string    `json:"app_id" db:"app_id" validate:"required"`
+	ServerKey string    `json:"server_key" db:"server_key" validate:"required"`
+	CreatedAt time.Time `json:"created_at" db:"created_at" validate:"required"`
+}
 
 // ServiceAccountKey is represented FCM Service Account Key format
 type ServiceAccountKey struct {

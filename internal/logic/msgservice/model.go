@@ -9,8 +9,8 @@ import (
 // ------- I/O for FCM Multicast Message
 
 type FcmMulticastInput struct {
-	AppID                   string                   `validate:"required"`
-	TaskPayloadFCMMulticast *TaskPayloadFCMMulticast `validate:"required"`
+	AppID   string                `validate:"required"`
+	Payload *fcm.MulticastMessage `validate:"required"`
 }
 
 // FCMMulticastResult output data for FCMMulticastOutput
@@ -29,8 +29,8 @@ type FCMMulticastOutput struct {
 
 // FcmLegacyInput input param for sending FCM Legacy message
 type FcmLegacyInput struct {
-	AppID                string                `validate:"required"`
-	TaskPayloadFCMLegacy *TaskPayloadFCMLegacy `validate:"required"`
+	AppID   string             `validate:"required"`
+	Payload *fcm.LegacyMessage `validate:"required"`
 }
 
 // FCMLegacyResult output data for FCMMulticastOutput

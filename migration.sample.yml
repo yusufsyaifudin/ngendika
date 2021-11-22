@@ -1,0 +1,11 @@
+apprepo:
+  dialect: postgres
+  datasource: user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable
+  dir: assets/migrations/postgres/apprepo
+  table: migrations_apprepo
+
+fcmrepo:
+  dialect: postgres
+  datasource: user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable
+  dir: assets/migrations/postgres/fcmrepo
+  table: migrations_fcmrepo

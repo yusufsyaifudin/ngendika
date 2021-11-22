@@ -5,21 +5,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/adjust/rmq/v4"
 	"github.com/go-playground/validator/v10"
 	"github.com/go-redis/redis/v8"
-	"github.com/hibiken/asynq"
+	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 )
 
 type RedisConfig struct {
-	Concurrency int                   `validate:"required"`
-	RedisClient redis.UniversalClient ` validate:"required"`
+	Context       context.Context `validate:"required"`
+	QueueName     string          `validate:"required"`
+	CleanUpTicker time.Duration   `validate:"required"`
+	Concurrency   int             `validate:"required"`
+	RedisClient   *redis.Client   ` validate:"required,structonly"`
 }
 
 type Redis struct {
-	queueTypeName string
-	publisher     *asynq.Client
-	subscriber    *asynq.Server
+	conf  RedisConfig
+	queue rmq.Queue
 }
 
 var _ IPublisher = (*Redis)(nil)
@@ -31,25 +35,34 @@ func NewRedis(conf RedisConfig) (*Redis, error) {
 		return nil, err
 	}
 
-	client := &redisUniversalClient{
-		conn: conf.RedisClient,
+	var errChan = make(chan error)
+	conn, err := rmq.OpenConnectionWithRedisClient("producer", conf.RedisClient, errChan)
+	if err != nil {
+		return nil, err
 	}
 
-	publisher := asynq.NewClient(client)
-	subscriber := asynq.NewServer(client, asynq.Config{
-		Concurrency:    conf.Concurrency,            // Specify how many concurrent workers to use
-		RetryDelayFunc: asynq.DefaultRetryDelayFunc, // Function to calculate retry delay for a failed task.
-		Queues: map[string]int{ // Optionally specify multiple queues with different priority.
-			"critical": 6,
-			"default":  3,
-			"low":      1,
-		},
-	})
+	queue, err := conn.OpenQueue(conf.QueueName)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		cleaner := rmq.NewCleaner(conn)
+		for range time.Tick(conf.CleanUpTicker) {
+			returned, err := cleaner.Clean()
+			if err != nil {
+				logger.Error(conf.Context, fmt.Sprintf("failed to clean redis queue '%s'", conf.QueueName),
+					logger.KV("error", err),
+				)
+				continue
+			}
+			logger.Debug(conf.Context, fmt.Sprintf("cleaned %d from redis queue '%s'", returned, conf.QueueName))
+		}
+	}()
 
 	return &Redis{
-		queueTypeName: "ngendika_queue::", // MUST BE STATIC, DON'T CHANGE AT RUN TIME
-		publisher:     publisher,
-		subscriber:    subscriber,
+		conf:  conf,
+		queue: queue,
 	}, nil
 }
 
@@ -59,51 +72,56 @@ func (r *Redis) Publish(ctx context.Context, msg *Message) (err error) {
 		return err
 	}
 
-	task := asynq.NewTask(r.queueTypeName, payload)
-	_, err = r.publisher.Enqueue(task)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	err = r.queue.PublishBytes(payload)
+	return
 }
 
 func (r *Redis) Subscribe(parentCtx context.Context, handler SubscribeHandler) {
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(r.queueTypeName, func(ctx context.Context, task *asynq.Task) error {
-		var msg *Message
-		if err := json.Unmarshal(task.Payload(), &msg); err != nil {
-			return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
+	const (
+		prefetchLimit = 1000
+		pollDuration  = 100 * time.Millisecond
+	)
+
+	if err := r.queue.StartConsuming(prefetchLimit, pollDuration); err != nil {
+		logger.Error(r.conf.Context, "error starting the consumer", logger.KV("error", err))
+		return
+	}
+
+	for i := 0; i < r.conf.Concurrency; i++ {
+		name := fmt.Sprintf("consumer %d", i)
+
+		_, err := r.queue.AddConsumerFunc(name, func(delivery rmq.Delivery) {
+			err := handler(parentCtx, &Message{
+				LoggableID: name,
+				Body:       []byte(delivery.Payload()),
+			})
+			if errors.Is(err, ErrTriggerDoNackMessage) {
+				logger.Error(r.conf.Context, "push back message to dead letter queue", logger.KV("error", err))
+
+				err = delivery.Push() // push back to rejected message
+				if err != nil {
+					logger.Error(r.conf.Context, "error push into dead letter queue", logger.KV("error", err))
+					return
+				}
+
+				err = nil // discard error
+			}
+
+			if err != nil {
+				logger.Error(r.conf.Context, "error handle message", logger.KV("error", err))
+				return
+			}
+
+		})
+
+		if err != nil {
+			logger.Error(r.conf.Context, "error adding new consumer", logger.KV("error", err))
+			return
 		}
-
-		msg.LoggableID = task.Type()
-
-		err := handler(ctx, msg)
-		if errors.Is(err, ErrTriggerDoNackMessage) {
-			// push back the message to queue if this is not the right handler
-			// TODO: this will cause message looping if there is no worker running to handle the message
-			//  solution: add register type for each handle
-			return r.Publish(ctx, msg)
-		}
-
-		return err
-	})
-
-	_ = r.subscriber.Run(mux) // TODO handle error
+	}
 }
 
 func (r *Redis) Shutdown(ctx context.Context) (err error) {
-	r.subscriber.Stop()
-	r.subscriber.Shutdown()
-	return r.publisher.Close()
-}
-
-// --- helper
-
-type redisUniversalClient struct {
-	conn redis.UniversalClient
-}
-
-func (r *redisUniversalClient) MakeRedisClient() interface{} {
-	return r.conn
+	r.queue.StopConsuming()
+	return
 }

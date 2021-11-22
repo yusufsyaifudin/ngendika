@@ -4,6 +4,8 @@ import (
 	"context"
 )
 
+type Process func(ctx context.Context, task *Task) (out *TaskResult, err error)
+
 type Service interface {
-	Process(ctx context.Context, task *Task) (out *TaskResult, err error)
+	Process() Process
 }

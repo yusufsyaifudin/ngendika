@@ -3,7 +3,7 @@ package appservice
 import (
 	"time"
 
-	"github.com/yusufsyaifudin/ngendika/storage/fcmsvcacckeyrepo"
+	"github.com/yusufsyaifudin/ngendika/internal/storage/fcmrepo"
 )
 
 // App is like appstore.App but this only use for returning output via external service.
@@ -25,13 +25,13 @@ type CreateAppOut struct {
 }
 
 type CreateFcmSvcAccKeyIn struct {
-	ClientID             string                             `json:"client_id" validate:"required"`
-	FCMServiceAccountKey fcmsvcacckeyrepo.ServiceAccountKey `json:"fcm_service_account_key" validate:"required"`
+	ClientID             string                    `json:"client_id" validate:"required"`
+	FCMServiceAccountKey fcmrepo.ServiceAccountKey `json:"fcm_service_account_key" validate:"required"`
 }
 
 type CreateFcmSvcAccKeyOut struct {
-	ServiceAccountKey fcmsvcacckeyrepo.ServiceAccountKey `json:"service_account_key,omitempty"`
-	CreatedAt         time.Time                          `json:"created_at"`
+	ServiceAccountKey fcmrepo.ServiceAccountKey `json:"service_account_key,omitempty"`
+	CreatedAt         time.Time                 `json:"created_at"`
 }
 
 type GetFcmSvcAccKeyIn struct {
@@ -39,8 +39,8 @@ type GetFcmSvcAccKeyIn struct {
 }
 
 type GetFcmSvcAccKeyOutList struct {
-	ID                string                             `json:"id"`
-	ServiceAccountKey fcmsvcacckeyrepo.ServiceAccountKey `json:"service_account_key"`
+	ID                string                    `json:"id"`
+	ServiceAccountKey fcmrepo.ServiceAccountKey `json:"service_account_key"`
 }
 
 type GetFcmSvcAccKeyOut struct {

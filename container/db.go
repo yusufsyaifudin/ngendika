@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	_ "github.com/lib/pq"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/jmoiron/sqlx"
 	"github.com/yusufsyaifudin/ngendika/config"
@@ -19,11 +21,6 @@ type SqlDbConnMaker struct {
 }
 
 func NewSqlDbConnMaker(ctx context.Context, conf config.Database) (*SqlDbConnMaker, error) {
-	err := validator.New().Struct(conf)
-	if err != nil {
-		return nil, err
-	}
-
 	instance := &SqlDbConnMaker{
 		ctx:    ctx,
 		conf:   conf,
@@ -31,7 +28,7 @@ func NewSqlDbConnMaker(ctx context.Context, conf config.Database) (*SqlDbConnMak
 		closer: make([]Closer, 0),
 	}
 
-	err = instance.connect()
+	err := instance.connect()
 	if err != nil {
 		// close previous opened connection if error happen
 		if _err := instance.CloseAll(); _err != nil {
@@ -84,7 +81,7 @@ func (i *SqlDbConnMaker) connect() error {
 
 	for key, dbConfig := range i.conf {
 		key = strings.TrimSpace(strings.ToLower(key))
-		if err := validator.New().Var(key, "required,alphanumeric"); err != nil {
+		if err := validator.New().Var(key, "required,alphanum"); err != nil {
 			err = fmt.Errorf("error connecting to database key '%s': %w", key, err)
 			return err
 		}

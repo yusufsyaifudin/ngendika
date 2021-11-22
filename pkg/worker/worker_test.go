@@ -3,6 +3,7 @@ package worker_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -111,8 +112,11 @@ func BenchmarkNewWorker(b *testing.B) {
 	dispatcher := worker.NewWorker(8, 100)
 	defer dispatcher.Done()
 
-	for i := 0; i < b.N; i++ {
-		id := uint64(i)
+	var id uint64
+	for i := 1; i <= b.N; i++ {
+		id = uint64(i)
 		dispatcher.AddJob(&Job{id: id})
 	}
+
+	fmt.Println("DONE QUEUE => ", id)
 }

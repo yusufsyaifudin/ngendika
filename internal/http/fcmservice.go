@@ -6,13 +6,11 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
-	"github.com/yusufsyaifudin/ngendika/pkg/logger"
+	"github.com/yusufsyaifudin/ngendika/internal/storage/fcmrepo"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
-	"github.com/yusufsyaifudin/ngendika/storage/fcmsvcacckeyrepo"
 )
 
 type ConfigFCMService struct {
-	Logger              logger.Logger                `validate:"required"`
 	ResponseConstructor response.HTTPRespConstructor `validate:"required"`
 	ResponseWriter      response.Writer              `validate:"required"`
 	AppService          appservice.Service           `validate:"required"`
@@ -75,7 +73,7 @@ func (h *HandlerFCMService) Upload() func(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		var fcmServiceAccountKey fcmsvcacckeyrepo.ServiceAccountKey
+		var fcmServiceAccountKey fcmrepo.ServiceAccountKey
 		dec := json.NewDecoder(file)
 		dec.DisallowUnknownFields()
 		err = dec.Decode(&fcmServiceAccountKey)

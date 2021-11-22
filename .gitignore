@@ -1,7 +1,8 @@
 .idea
 .DS_Store
 tmp
-config.yaml
+config.yml
 config_worker.yaml
 docs
 example/fcm-web-example
+migration.yml

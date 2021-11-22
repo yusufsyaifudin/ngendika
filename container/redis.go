@@ -12,25 +12,25 @@ import (
 )
 
 type RedisConnMaker struct {
-	ctx          context.Context
-	conf         config.Redis
-	redisConnMap map[string]redis.UniversalClient
-	closer       []Closer
+	ctx           context.Context
+	conf          config.Redis
+	redisSingle   map[string]*redis.Client
+	redisSentinel map[string]*redis.Client
+	redisCluster  map[string]*redis.ClusterClient
+	closer        []Closer
 }
 
 func NewRedisConnMaker(ctx context.Context, conf config.Redis) (*RedisConnMaker, error) {
-	err := validator.New().Struct(conf)
-	if err != nil {
-		return nil, err
-	}
-
 	instance := &RedisConnMaker{
-		ctx:          ctx,
-		redisConnMap: make(map[string]redis.UniversalClient),
-		closer:       make([]Closer, 0),
+		ctx:           ctx,
+		conf:          conf,
+		redisSingle:   map[string]*redis.Client{},
+		redisSentinel: map[string]*redis.Client{},
+		redisCluster:  map[string]*redis.ClusterClient{},
+		closer:        make([]Closer, 0),
 	}
 
-	err = instance.connect()
+	err := instance.connect()
 	if err != nil {
 		// close previous opened connection if error happen
 		if _err := instance.CloseAll(); _err != nil {
@@ -49,65 +49,121 @@ func (i *RedisConnMaker) connect() error {
 
 	for key, connInfo := range i.conf {
 		key = strings.TrimSpace(strings.ToLower(key))
-		if err := validator.New().Var(key, "required,alphanumeric"); err != nil {
-			err = fmt.Errorf("error connecting to database key '%s': %w", key, err)
+		if err := validator.New().Var(key, "required,alphanum"); err != nil {
+			err = fmt.Errorf("error connecting to redis key '%s': %w", key, err)
 			return err
 		}
 
 		var redisClient redis.UniversalClient
 		switch connInfo.Mode {
 		case "single":
-			redisClient = redis.NewClient(&redis.Options{
+			single := redis.NewClient(&redis.Options{
 				Addr:     connInfo.Address[0],
 				Username: connInfo.Username,
 				Password: connInfo.Password,
 				DB:       connInfo.DB,
 			})
+
+			i.redisSingle[key] = single
+			redisClient = single
+
 		case "sentinel":
-			redisClient = redis.NewFailoverClient(&redis.FailoverOptions{
+			sentinel := redis.NewFailoverClient(&redis.FailoverOptions{
 				SentinelAddrs: connInfo.Address,
 				Username:      connInfo.Username,
 				Password:      connInfo.Password,
 				DB:            connInfo.DB,
 				MasterName:    connInfo.MasterName,
 			})
+
+			i.redisSentinel[key] = sentinel
+			redisClient = sentinel
+
 		case "cluster":
 			// cluster mode is not support DB selection
-			redisClient = redis.NewClusterClient(&redis.ClusterOptions{
+			cluster := redis.NewClusterClient(&redis.ClusterOptions{
 				Addrs:    connInfo.Address,
 				Username: connInfo.Username,
 				Password: connInfo.Password,
 			})
+
+			i.redisCluster[key] = cluster
+			redisClient = cluster
+
 		default:
 			err := fmt.Errorf("unknown redis mode: %s", connInfo.Mode)
 			return err
 		}
 
+		if redisClient == nil {
+			return fmt.Errorf("redis client %s is nil", key)
+		}
+
 		err := redisClient.Ping(ctx).Err()
 		if err != nil {
+			err = fmt.Errorf("error ping redis %s: %w", key, err)
 			return err
 		}
 
-		i.redisConnMap[key] = redisClient
-		i.closer = append(i.closer, NewNamedCloser(key, redisClient))
+		i.closer = append(i.closer, NewNamedCloser(key, redisClient)) // register the closer
 	}
 
 	return nil
 }
 
-func (i *RedisConnMaker) Get(key string) (redis.UniversalClient, error) {
-	v, ok := i.redisConnMap[key]
+func (i *RedisConnMaker) GetSingle(key string) (*redis.Client, error) {
+	key = strings.TrimSpace(strings.ToLower(key))
+	v, ok := i.redisSingle[key]
 	if !ok {
-		return nil, fmt.Errorf("key %s is not exist on redis list", key)
+		return nil, fmt.Errorf("key %s is not found on any redis with single architecture", key)
 	}
 
 	return v, nil
 }
 
+func (i *RedisConnMaker) GetSentinel(key string) (*redis.Client, error) {
+	key = strings.TrimSpace(strings.ToLower(key))
+	v, ok := i.redisSentinel[key]
+	if !ok {
+		return nil, fmt.Errorf("key %s is not found on any redis with sentinel architecture", key)
+	}
+
+	return v, nil
+}
+
+func (i *RedisConnMaker) GetCluster(key string) (*redis.ClusterClient, error) {
+	key = strings.TrimSpace(strings.ToLower(key))
+	v, ok := i.redisCluster[key]
+	if !ok {
+		return nil, fmt.Errorf("key %s is not found on any redis with cluster architecture", key)
+	}
+
+	return v, nil
+}
+
+func (i *RedisConnMaker) Get(key string) (v redis.UniversalClient, err error) {
+	v, err = i.GetSingle(key)
+	if err == nil {
+		return v, nil
+	}
+
+	v, err = i.GetSentinel(key)
+	if err == nil {
+		return v, nil
+	}
+
+	v, err = i.GetCluster(key)
+	if err == nil {
+		return v, nil
+	}
+
+	return nil, fmt.Errorf("key %s is not found in any redis topology", key)
+}
+
 func (i *RedisConnMaker) CloseAll() error {
 	ctx := i.ctx
 
-	logger.Debug(ctx, "db sql: trying to close")
+	logger.Debug(ctx, "redis: trying to close")
 
 	var err error
 	for _, closer := range i.closer {
@@ -118,12 +174,12 @@ func (i *RedisConnMaker) CloseAll() error {
 		if e := closer.Close(); e != nil {
 			err = fmt.Errorf("%v: %w", err, e)
 		} else {
-			logger.Debug(ctx, fmt.Sprintf("db sql: %s success to close", closer.Name()))
+			logger.Debug(ctx, fmt.Sprintf("redis: %s success to close", closer.Name()))
 		}
 	}
 
 	if err != nil {
-		logger.Error(ctx, "db sql: some error occurred when closing dep", logger.KV("error", err))
+		logger.Error(ctx, "redis: some error occurred when closing dep", logger.KV("error", err))
 	}
 
 	return err

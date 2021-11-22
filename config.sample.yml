@@ -19,7 +19,7 @@ database:
     disable: false
     debug: true
     driver: "postgres"
-    dsn: "user=postgres password=postgres host=localhost port=5432 dbname=danbam sslmode=disable" # Data Source Name
+    dsn: "user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable" # Data Source Name
 
 ## define redis connection
 redis:
@@ -40,13 +40,7 @@ appRepo:
   cacheKeyPrefix: appStore
   redis: redis1 # refer to redis
 
-FCMServerKeyRepo:
-  database: db1 # refer to database
-  cache: false
-  cacheKeyPrefix: appStore
-  redis: redis1 # refer to redis
-
-FCMServiceAccountKeyRepo:
+fcmRepo:
   database: db1 # refer to database
   cache: false
   cacheKeyPrefix: appStore

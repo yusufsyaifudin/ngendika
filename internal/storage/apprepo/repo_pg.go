@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/jmoiron/sqlx"
-	"github.com/yusufsyaifudin/ngendika/storage"
 )
 
 const (
@@ -42,7 +41,7 @@ func Postgres(conf RepoPostgresConfig) (service *RepoPostgres, err error) {
 func (p *RepoPostgres) CreateApp(ctx context.Context, app App) (insertedApp App, err error) {
 	err = validator.New().Struct(app)
 	if err != nil {
-		err = fmt.Errorf("%w: %s", storage.ErrValidation, err)
+		err = fmt.Errorf("%w: %s", ErrValidation, err)
 		return
 	}
 
@@ -57,7 +56,7 @@ func (p *RepoPostgres) CreateApp(ctx context.Context, app App) (insertedApp App,
 func (p *RepoPostgres) GetAppByClientID(ctx context.Context, clientID string) (appData App, err error) {
 	clientID = strings.ToLower(strings.TrimSpace(clientID))
 	if clientID == "" {
-		return appData, storage.ErrAppWrongClientID
+		return appData, ErrAppWrongClientID
 	}
 
 	err = sqlx.GetContext(ctx, p.Config.Connection, &appData, sqlGetAppByClientID, clientID)

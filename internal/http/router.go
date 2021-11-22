@@ -29,7 +29,6 @@ const (
 type Config struct {
 	DebugError        bool
 	UID               uid.UID            `validate:"required"`
-	Log               logger.Logger      `validate:"required"`
 	AppService        appservice.Service `validate:"required"`
 	MessageProcessor  msgservice.Service `validate:"required"`
 	MessageDispatcher msgservice.Service `validate:"required"`
@@ -45,7 +44,6 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	}
 
 	handlerApp, err := NewHandlerAppService(ConfigAppService{
-		Logger:              config.Log,
 		ResponseConstructor: response.NewResponseConstructor(config.DebugError),
 		ResponseWriter:      response.New(),
 		AppService:          config.AppService,
@@ -55,7 +53,6 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	}
 
 	handlerFCM, err := NewHandlerFCMService(ConfigFCMService{
-		Logger:              config.Log,
 		ResponseConstructor: response.NewResponseConstructor(config.DebugError),
 		ResponseWriter:      response.New(),
 		AppService:          config.AppService,
@@ -66,7 +63,6 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	}
 
 	handlerPN := &HandlerMessageService{
-		Logger:               config.Log,
 		UID:                  config.UID,
 		ResponseConstructor:  response.NewResponseConstructor(config.DebugError),
 		ResponseWriter:       response.New(),
