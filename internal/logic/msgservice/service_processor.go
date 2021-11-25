@@ -2,21 +2,17 @@ package msgservice
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/go-resty/resty/v2"
-	"github.com/segmentio/encoding/json"
-	"github.com/yusufsyaifudin/ngendika/internal/storage/apprepo"
-	"github.com/yusufsyaifudin/ngendika/internal/storage/fcmrepo"
+	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
 )
 
 type ProcessorConfig struct {
-	AppRepo apprepo.Repo `validate:"required"`
-	FCMRepo fcmrepo.Repo `validate:"required"`
+	FCMService fcmservice.Service `validate:"required"`
 
 	FCMClient  fcm.Client    `validate:"required"`
 	RESTClient *resty.Client `validate:"required"`
@@ -41,26 +37,9 @@ func NewProcessor(conf ProcessorConfig) (*Processor, error) {
 
 func (p *Processor) Process() Process {
 	return func(ctx context.Context, task *Task) (out *TaskResult, err error) {
-		appRepo := p.Config.AppRepo
-
-		if task.Message == nil {
-			task.Message = &Message{}
-		}
-
 		err = validator.New().Struct(task)
 		if err != nil {
-			return
-		}
-
-		app, err := appRepo.GetAppByClientID(ctx, task.ClientID)
-		if err != nil {
-			err = fmt.Errorf("client id %s not found: %w", task.ClientID, err)
-			return
-		}
-
-		if !app.Enabled {
-			err = fmt.Errorf("app %s is diabled", app.ClientID)
-			return
+			return nil, err
 		}
 
 		var (
@@ -78,10 +57,9 @@ func (p *Processor) Process() Process {
 
 		go func() {
 			defer wg.Done()
-
 			outFCMMulticast, outFCMMulticastErr = p.FcmMulticast(ctx, &FcmMulticastInput{
-				AppID:   app.ID,
-				Payload: task.Message.FCMMulticast,
+				AppClientID: task.ClientID,
+				Payload:     task.Message.FCMMulticast,
 			})
 		}()
 
@@ -89,8 +67,8 @@ func (p *Processor) Process() Process {
 			defer wg.Done()
 
 			outFCMLegacy, outFCMLegacyErr = p.FcmLegacy(ctx, &FcmLegacyInput{
-				AppID:   app.ID,
-				Payload: task.Message.FCMLegacy,
+				AppClientID: task.ClientID,
+				Payload:     task.Message.FCMLegacy,
 			})
 		}()
 
@@ -98,7 +76,7 @@ func (p *Processor) Process() Process {
 			defer wg.Done()
 
 			outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
-				AppClientID: app.ID,
+				AppClientID: task.ClientID,
 				Webhook:     task.Message.Webhook,
 			})
 		}()
@@ -131,28 +109,16 @@ func (p *Processor) FcmMulticast(ctx context.Context, input *FcmMulticastInput) 
 		return
 	}
 
-	fcmSvcAccKeyRepo := p.Config.FCMRepo.FCMServiceAccountKey()
-
-	serviceAccountKeys, err := fcmSvcAccKeyRepo.FetchAll(ctx, input.AppID)
+	fcmService, err := p.Config.FCMService.GetSvcAccKey(ctx, fcmservice.GetSvcAccKeyIn{
+		ClientID: input.AppClientID,
+	})
 	if err != nil {
-		err = fmt.Errorf("error get fcm service account key: %w", err)
-		return
+		return nil, err
 	}
 
 	var multicastRes = make([]FCMMulticastResult, 0)
-
-	for _, serviceAccountKey := range serviceAccountKeys {
-		key, err := json.Marshal(serviceAccountKey.ServiceAccountKey) // please ensure you pass the right data to marshal here
-		if err != nil {
-			err = fmt.Errorf("service account json for id %s is error: %w", serviceAccountKey.ID, err)
-			multicastRes = append(multicastRes, FCMMulticastResult{
-				FCMKeyID: serviceAccountKey.ID,
-				Error:    err.Error(),
-			})
-			continue
-		}
-
-		batchRes, err := p.Config.FCMClient.SendMulticast(ctx, key, input.Payload)
+	for _, serviceAccountKey := range fcmService.Lists {
+		batchRes, err := p.Config.FCMClient.SendMulticast(ctx, serviceAccountKey.ServiceAccountKey, input.Payload)
 		if err != nil {
 			multicastRes = append(multicastRes, FCMMulticastResult{
 				FCMKeyID: serviceAccountKey.ID,
@@ -185,18 +151,16 @@ func (p *Processor) FcmLegacy(ctx context.Context, input *FcmLegacyInput) (out *
 		return
 	}
 
-	fcmServerKey := p.Config.FCMRepo.FCMServerKey()
-
-	serverKeys, err := fcmServerKey.FetchAll(ctx, input.AppID)
+	fcmServerKeys, err := p.Config.FCMService.GetServerKey(ctx, fcmservice.GetServerKeyIn{
+		ClientID: input.AppClientID,
+	})
 	if err != nil {
-		err = fmt.Errorf("error get fcm service acoount key: %w", err)
-		return
+		return nil, err
 	}
 
 	var legacyResp = make([]FCMLegacyResult, 0)
 
-	for _, key := range serverKeys {
-
+	for _, key := range fcmServerKeys.Lists {
 		batchRes, err := p.Config.FCMClient.SendLegacy(ctx, key.ServerKey, input.Payload)
 		if err != nil {
 			legacyResp = append(legacyResp, FCMLegacyResult{
@@ -246,9 +210,9 @@ func (p *Processor) Webhook(ctx context.Context, input *WebhookInput) (out *Webh
 			SetFormDataFromValues(payload.FormData)
 
 		resp, errResp := req.Execute(req.Method, payload.URL)
-
 		if errResp != nil {
 			webhookResult = append(webhookResult, WebhookResult{
+				ReferenceID: payload.ReferenceID,
 				Error: &WebhookError{
 					Code:          ErrWebhookRequest,
 					MessageDetail: errResp.Error(),
@@ -258,8 +222,9 @@ func (p *Processor) Webhook(ctx context.Context, input *WebhookInput) (out *Webh
 		}
 
 		webhookResult = append(webhookResult, WebhookResult{
-			Header: resp.Header(),
-			Body:   string(resp.Body()),
+			ReferenceID: payload.ReferenceID,
+			Header:      resp.Header(),
+			Body:        string(resp.Body()),
 		})
 	}
 

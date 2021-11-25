@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"time"
 )
 
 // Service is an interface of final business logic.
@@ -9,7 +10,24 @@ import (
 // i.e: request or response from HTTP handler
 type Service interface {
 	CreateApp(ctx context.Context, input CreateAppIn) (out CreateAppOut, err error)
+	GetAppByClientID(ctx context.Context, clientID string) (app App, err error)
+}
 
-	CreateFcmSvcAccKey(ctx context.Context, input CreateFcmSvcAccKeyIn) (out CreateFcmSvcAccKeyOut, err error)
-	GetFcmSvcAccKey(ctx context.Context, input GetFcmSvcAccKeyIn) (out GetFcmSvcAccKeyOut, err error)
+// App is like appstore.App but this only use for returning output via external service.
+type App struct {
+	ID        string
+	ClientID  string
+	Name      string
+	Enabled   bool
+	CreatedAt time.Time
+}
+
+// CreateAppIn ...
+type CreateAppIn struct {
+	ClientID string `validate:"required"`
+	Name     string `validate:"required"`
+}
+
+type CreateAppOut struct {
+	App App
 }

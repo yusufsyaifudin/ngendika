@@ -9,8 +9,8 @@ import (
 // ------- I/O for FCM Multicast Message
 
 type FcmMulticastInput struct {
-	AppID   string                `validate:"required"`
-	Payload *fcm.MulticastMessage `validate:"required"`
+	AppClientID string                `validate:"required"`
+	Payload     *fcm.MulticastMessage `validate:"required"`
 }
 
 // FCMMulticastResult output data for FCMMulticastOutput
@@ -29,8 +29,8 @@ type FCMMulticastOutput struct {
 
 // FcmLegacyInput input param for sending FCM Legacy message
 type FcmLegacyInput struct {
-	AppID   string             `validate:"required"`
-	Payload *fcm.LegacyMessage `validate:"required"`
+	AppClientID string             `validate:"required"`
+	Payload     *fcm.LegacyMessage `validate:"required"`
 }
 
 // FCMLegacyResult output data for FCMMulticastOutput
@@ -50,7 +50,7 @@ type FCMLegacyOutput struct {
 // WebhookInput input webhook
 type WebhookInput struct {
 	AppClientID string               `validate:"required"`
-	Webhook     []TaskPayloadWebhook `validate:"required,max=10"`
+	Webhook     []TaskPayloadWebhook `validate:"required,omitempty,max=10"`
 }
 
 // WebhookOutput .
@@ -60,7 +60,8 @@ type WebhookOutput struct {
 
 // WebhookResult result of webhook
 type WebhookResult struct {
-	Header http.Header   `json:"header,omitempty"`
-	Body   string        `json:"body,omitempty"`
-	Error  *WebhookError `json:"error,omitempty"`
+	ReferenceID string        `json:"reference_id"`
+	Header      http.Header   `json:"header,omitempty"`
+	Body        string        `json:"body,omitempty"`
+	Error       *WebhookError `json:"error,omitempty"`
 }

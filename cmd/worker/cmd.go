@@ -12,6 +12,8 @@ import (
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/config"
 	"github.com/yusufsyaifudin/ngendika/container"
+	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
+	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/msgservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
@@ -115,11 +117,28 @@ func (c *Cmd) Run(args []string) int {
 
 	// ** START SERVICES
 	logger.Info(ctx, "~ setting up services")
+	logger.Info(ctx, "~~ app service")
+	appService, err := appservice.New(appservice.DefaultServiceConfig{
+		AppRepo: appRepo,
+	})
+	if err != nil {
+		logger.Error(ctx, "~~ setting up app service error", logger.KV("error", err))
+		return ExitErr
+	}
+
+	logger.Info(ctx, "~~ FCM service")
+	fcmService, err := fcmservice.New(fcmservice.DefaultServiceConfig{
+		FCMRepo:    fcmRepo,
+		AppService: appService,
+	})
+	if err != nil {
+		logger.Error(ctx, "~~ setting up FCM service error", logger.KV("error", err))
+		return ExitErr
+	}
 
 	logger.Info(ctx, "~~ preparing message service processor")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
-		AppRepo:    appRepo,
-		FCMRepo:    fcmRepo,
+		FCMService: fcmService,
 		FCMClient:  fcmClient,
 		RESTClient: resty.New(),
 	})
@@ -137,7 +156,7 @@ func (c *Cmd) Run(args []string) int {
 		// pubsub can only support redis with single architecture
 		redisConn, err := defaultContainer.GetRedis().GetSingle(configVal.Worker.QueueIdentifier)
 		if err != nil {
-			err = fmt.Errorf("pubsub with type redis: %s get connection error: %w", err)
+			err = fmt.Errorf("pubsub with type redis: %s get connection error: %w", configVal.Worker.QueueIdentifier, err)
 			logger.Error(ctx, "worker error", logger.KV("error", err))
 			return ExitErr
 		}

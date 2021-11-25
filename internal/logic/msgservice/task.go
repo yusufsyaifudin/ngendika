@@ -26,12 +26,13 @@ type Message struct {
 // The task is only intended for simple webhook, not support multipart form for upload files.
 // PostForm should be ok.
 type TaskPayloadWebhook struct {
-	URL        string      `json:"url" validate:"required"`
-	Method     string      `json:"method" validate:"required,oneof=GET POST PUT PATCH DELETE"`
-	Header     http.Header `json:"header"`
-	Body       string      `json:"body"`
-	QueryParam url.Values  `json:"query_param"`
-	FormData   url.Values  `json:"form_data"`
+	ReferenceID string      `json:"reference_id" validate:"required"` // Reference ID from user to know which request is success/fail
+	URL         string      `json:"url" validate:"required"`
+	Method      string      `json:"method" validate:"required,oneof=GET POST PUT PATCH DELETE"`
+	Header      http.Header `json:"header"`
+	Body        string      `json:"body"`
+	QueryParam  url.Values  `json:"query_param"`
+	FormData    url.Values  `json:"form_data"`
 }
 
 type TaskResult struct {

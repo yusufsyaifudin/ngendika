@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/docgen"
 	"github.com/go-chi/httptracer"
 	"github.com/go-playground/validator/v10"
 	"github.com/opentracing/opentracing-go"
 	"github.com/satori/uuid"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
+	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/msgservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
@@ -27,9 +27,13 @@ const (
 )
 
 type Config struct {
+	AppServiceName string `validate:"required"`
+	AppVersion     string `validate:"required"`
+
 	DebugError        bool
 	UID               uid.UID            `validate:"required"`
 	AppService        appservice.Service `validate:"required"`
+	FCMService        fcmservice.Service `validate:"required"`
 	MessageProcessor  msgservice.Service `validate:"required"`
 	MessageDispatcher msgservice.Service `validate:"required"`
 }
@@ -43,43 +47,46 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 		return nil, fmt.Errorf("http transport config error: %w", err)
 	}
 
-	handlerApp, err := NewHandlerAppService(ConfigAppService{
-		ResponseConstructor: response.NewResponseConstructor(config.DebugError),
-		ResponseWriter:      response.New(),
+	respConstructor := response.NewResponseConstructor(config.DebugError)
+	respWriter := response.New()
+
+	handlerApp, err := NewHandlerAppService(HandlerAppServiceConfig{
+		ResponseConstructor: respConstructor,
+		ResponseWriter:      respWriter,
 		AppService:          config.AppService,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	handlerFCM, err := NewHandlerFCMService(ConfigFCMService{
-		ResponseConstructor: response.NewResponseConstructor(config.DebugError),
-		ResponseWriter:      response.New(),
-		AppService:          config.AppService,
+	handlerFCM, err := NewHandlerFCMService(HandlerFCMServiceConfig{
+		ResponseConstructor: respConstructor,
+		ResponseWriter:      respWriter,
+		FCMService:          config.FCMService,
 	})
 
 	if err != nil {
 		return nil, err
 	}
 
-	handlerPN := &HandlerMessageService{
+	handlerMessage, err := NewHandlerMessageService(HandlerMessageServiceConfig{
 		UID:                  config.UID,
-		ResponseConstructor:  response.NewResponseConstructor(config.DebugError),
-		ResponseWriter:       response.New(),
+		ResponseConstructor:  respConstructor,
+		ResponseWriter:       respWriter,
 		MsgServiceDispatcher: config.MessageDispatcher,
 		MsgServiceProcessor:  config.MessageProcessor,
-	}
+	})
 
-	if err := validator.New().Struct(handlerApp); err != nil {
-		return nil, fmt.Errorf("http transport HandlerAppService error: %w", err)
+	if err != nil {
+		return nil, err
 	}
 
 	router := chi.NewRouter()
 
 	// TODO: add open telemetry here
 	router.Use(httptracer.Tracer(opentracing.NoopTracer{}, httptracer.Config{
-		ServiceName:    "ngendika",
-		ServiceVersion: "v0.1.0",
+		ServiceName:    config.AppServiceName,
+		ServiceVersion: config.AppVersion,
 		SampleRate:     1,
 		SkipFunc: func(r *http.Request) bool {
 			return r.URL.Path == "/health"
@@ -90,6 +97,7 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	// add trace FCMKeyID and also log request response
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var err error
 			t1 := time.Now().UTC()
 			ctx := r.Context()
 
@@ -110,7 +118,12 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			reqBody := make([]byte, 0)
 			var reqBodyData interface{}
 			if r.Body != nil {
-				reqBody, _ = ioutil.ReadAll(r.Body)
+				reqBody, err = ioutil.ReadAll(r.Body)
+				if err != nil {
+					logger.Error(ctx, "error read request body", logger.KV("error", err))
+					reqBody = []byte(``)
+				}
+
 				r.Body = ioutil.NopCloser(bytes.NewBuffer(reqBody))
 			}
 
@@ -125,13 +138,21 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			// read, copy, restore
 			respBody := make([]byte, 0)
 			if rec.Result().Body != nil {
-				respBody, _ = ioutil.ReadAll(rec.Result().Body)
+				respBody, err = ioutil.ReadAll(rec.Result().Body)
+				if err != nil {
+					logger.Error(ctx, "error read response body", logger.KV("error", err))
+					respBody = []byte(``)
+				}
+
 				rec.Result().Body = ioutil.NopCloser(bytes.NewBuffer(respBody))
 			}
 
-			var respBodyData interface{}
+			var respBodyData interface{} = map[string]interface{}{}
 			if _err := json.Unmarshal(respBody, &respBodyData); _err != nil {
-				respBodyData = string(respBody)
+				respBodyData = map[string]interface{}{
+					"raw_response_body": respBodyData,
+					"error":             _err,
+				}
 			}
 
 			for k, v := range rec.Result().Header {
@@ -139,7 +160,7 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			}
 
 			w.WriteHeader(rec.Code)
-			_, err := bytes.NewReader(respBody).WriteTo(w)
+			_, err = bytes.NewReader(respBody).WriteTo(w)
 			if err != nil {
 				err = fmt.Errorf("write response body error: %w", err)
 
@@ -164,33 +185,35 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 		})
 	})
 
+	todoHandler := func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"todo": true}`))
+	}
+
 	router.Route("/apps", func(r chi.Router) {
-		r.Post("/", handlerApp.CreateApp()) // create apps
-		r.Get("/", nil)                     // list of apps
-		r.Put("/{client_id}", nil)          // modify some field in apps (support patching)
-		r.Delete("/{client_id}", nil)       // delete apps
+		r.Post("/", handlerApp.CreateApp())   // create apps
+		r.Get("/", todoHandler)               // list of apps
+		r.Put("/{client_id}", todoHandler)    // modify some field in apps (support patching)
+		r.Delete("/{client_id}", todoHandler) // delete apps
 
-		r.Get("/fcm", handlerFCM.List())            // get paginate all fcm cert
-		r.Get("/fcm/{fcm_id}", handlerFCM.Upload()) // get fcm cert
-		r.Post("/fcm", handlerFCM.Upload())         // add fcm cert
+		r.Get("/fcm", handlerFCM.List())          // get all fcm cert
+		r.Get("/fcm/{fcm_id}", handlerFCM.List()) // get one fcm cert
+		r.Post("/fcm", handlerFCM.Upload())       // add fcm cert
+		r.Delete("/fcm", nil)                     // delete fcm cert, array of id
 
-		// {"client_id": "", "fcm_id": ["", ""]}
-		r.Delete("/fcm", nil) // delete fcm cert, array of id
-
-		r.Get("/apns", handlerFCM.Upload())    // get apns cert
-		r.Post("/apns", handlerFCM.Upload())   // add apns cert
-		r.Delete("/apns", handlerFCM.Upload()) // delete apns cert
+		r.Get("/apns", todoHandler)    // get apns cert
+		r.Post("/apns", todoHandler)   // add apns cert
+		r.Delete("/apns", todoHandler) // delete apns cert
 	})
 
 	router.Route("/messages", func(r chi.Router) {
-		r.Post("/", handlerPN.SendMessage) // send message
+		r.Post("/", handlerMessage.SendMessage) // send message
 	})
 
-	fmt.Println(docgen.MarkdownRoutesDoc(router, docgen.MarkdownOpts{
-		ProjectPath: "github.com/go-chi/chi/v5",
-		Intro:       "Welcome to the chi/_examples/rest generated docs.",
-	}))
-	return &defaultHTTP{router: router}, nil
+	instance := &defaultHTTP{
+		router: router,
+	}
+
+	return instance, nil
 }
 
 // Server .

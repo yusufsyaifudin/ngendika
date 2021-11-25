@@ -7,7 +7,6 @@ require (
 	github.com/adjust/rmq/v4 v4.0.1
 	github.com/appleboy/go-fcm v0.1.5
 	github.com/go-chi/chi/v5 v5.0.7
-	github.com/go-chi/docgen v1.2.0
 	github.com/go-chi/httptracer v0.3.0
 	github.com/go-playground/validator/v10 v10.9.0
 	github.com/go-redis/redis/v8 v8.11.4

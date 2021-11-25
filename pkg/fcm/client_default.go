@@ -3,20 +3,35 @@ package fcm
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
-	"github.com/appleboy/go-fcm"
+	goFCM "github.com/appleboy/go-fcm"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 )
 
-type ClientDefault struct{}
+type ClientDefault struct {
+	HTTPClient   *http.Client
+	RoundTripper http.RoundTripper // use shared Round Tripper
+}
 
 // Ensure ClientDefault implements Client
 var _ Client = (*ClientDefault)(nil)
 
 func NewClient() (*ClientDefault, error) {
-	return &ClientDefault{}, nil
+	roundTripper := &RoundTripper{
+		Base: http.DefaultTransport,
+	}
+
+	return &ClientDefault{
+		HTTPClient: &http.Client{
+			Transport: roundTripper,
+		},
+		RoundTripper: roundTripper,
+	}, nil
 }
 
 func (c *ClientDefault) SendMulticast(ctx context.Context, key []byte, message *MulticastMessage) (MulticastBatchResult, error) {
@@ -33,8 +48,33 @@ func (c *ClientDefault) SendMulticast(ctx context.Context, key []byte, message *
 		APNS:         message.APNS,
 	}
 
-	opt := option.WithCredentialsJSON(key)
-	firebaseApp, err := firebase.NewApp(ctx, &firebase.Config{}, opt)
+	scopes := []string{
+		"https://www.googleapis.com/auth/cloud-platform",
+	}
+
+	cred, err := google.CredentialsFromJSON(ctx, key, scopes...)
+	if err != nil {
+		return MulticastBatchResult{}, fmt.Errorf("find default cred error: %w", err)
+	}
+
+	config := &firebase.Config{
+		ProjectID: cred.ProjectID,
+	}
+
+	httpTransport := &oauth2.Transport{
+		Base:   c.RoundTripper,
+		Source: cred.TokenSource,
+	}
+
+	httpClient := &http.Client{
+		Transport: httpTransport,
+	}
+
+	opt := []option.ClientOption{
+		option.WithHTTPClient(httpClient),
+	}
+
+	firebaseApp, err := firebase.NewApp(ctx, config, opt...)
 	if err != nil {
 		return MulticastBatchResult{}, fmt.Errorf("initiate firebase app client error: %w", err)
 	}
@@ -53,7 +93,9 @@ func (c *ClientDefault) SendLegacy(ctx context.Context, serverKey string, msg *L
 		return LegacyResponse{}, nil
 	}
 
-	client, err := fcm.NewClient(serverKey)
+	client, err := goFCM.NewClient(serverKey,
+		goFCM.WithHTTPClient(c.HTTPClient),
+	)
 	if err != nil {
 		return LegacyResponse{}, fmt.Errorf("fcm client error: %w", err)
 	}
@@ -63,7 +105,7 @@ func (c *ClientDefault) SendLegacy(ctx context.Context, serverKey string, msg *L
 		notification = *msg.Notification
 	}
 
-	message := &fcm.Message{
+	message := &goFCM.Message{
 		To:                       msg.To,
 		RegistrationIDs:          msg.RegistrationIDs,
 		Condition:                msg.Condition,
@@ -76,7 +118,7 @@ func (c *ClientDefault) SendLegacy(ctx context.Context, serverKey string, msg *L
 		DeliveryReceiptRequested: msg.DeliveryReceiptRequested,
 		DryRun:                   msg.DryRun,
 		RestrictedPackageName:    msg.RestrictedPackageName,
-		Notification: &fcm.Notification{
+		Notification: &goFCM.Notification{
 			Title:        notification.Title,
 			Body:         notification.Body,
 			ChannelID:    notification.ChannelID,

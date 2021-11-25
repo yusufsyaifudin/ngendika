@@ -20,6 +20,7 @@ import (
 	"github.com/yusufsyaifudin/ngendika/config"
 	"github.com/yusufsyaifudin/ngendika/container"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
+	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/msgservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
@@ -33,19 +34,25 @@ const (
 
 type Cmd struct {
 	flags      *flag.FlagSet
+	appName    string
+	appVersion string
 	configFile string
 }
 
-func NewCmd() func() (cli.Command, error) {
+func NewCmd(appName, appVersion string) func() (cli.Command, error) {
 	return func() (cli.Command, error) {
-		cmd := &Cmd{}
+		cmd := &Cmd{
+			flags:      &flag.FlagSet{},
+			appName:    appName,
+			appVersion: appVersion,
+		}
 		err := cmd.init()
 		return cmd, err
 	}
 }
 
 var _ cli.Command = (*Cmd)(nil)
-var _ cli.CommandFactory = NewCmd()
+var _ cli.CommandFactory = NewCmd("", "")
 
 func (c *Cmd) init() error {
 	c.flags = flag.NewFlagSet("", flag.ContinueOnError)
@@ -130,19 +137,27 @@ func (c *Cmd) Run(args []string) int {
 	// ** START SERVICES
 	logger.Info(ctx, "~ setting up services")
 	logger.Info(ctx, "~~ app service")
-	appService, err := appservice.New(appservice.Config{
+	appService, err := appservice.New(appservice.DefaultServiceConfig{
 		AppRepo: appRepo,
-		FCMRepo: fcmRepo,
 	})
 	if err != nil {
 		logger.Error(ctx, "~~ setting up app service error", logger.KV("error", err))
 		return ExitErr
 	}
 
+	logger.Info(ctx, "~~ FCM service")
+	fcmService, err := fcmservice.New(fcmservice.DefaultServiceConfig{
+		FCMRepo:    fcmRepo,
+		AppService: appService,
+	})
+	if err != nil {
+		logger.Error(ctx, "~~ setting up FCM service error", logger.KV("error", err))
+		return ExitErr
+	}
+
 	logger.Info(ctx, "~~ preparing message service processor")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
-		AppRepo:    appRepo,
-		FCMRepo:    fcmRepo,
+		FCMService: fcmService,
 		FCMClient:  fcmClient,
 		RESTClient: resty.New(),
 	})
@@ -217,16 +232,19 @@ func (c *Cmd) Run(args []string) int {
 	}
 
 	// ** HTTP TRANSPORT
-	adminSrvConf := HTTPServer.Config{
+	serverConfig := HTTPServer.Config{
+		AppServiceName:    c.appName,
+		AppVersion:        c.appVersion,
 		DebugError:        true,
 		UID:               uuidFunc,
 		AppService:        appService,
+		FCMService:        fcmService,
 		MessageProcessor:  msgServiceProcessor,
 		MessageDispatcher: msgServiceDispatcher,
 	}
 
 	logger.Info(ctx, "~ prepare http transport")
-	server, err := HTTPServer.NewHTTPTransport(adminSrvConf)
+	server, err := HTTPServer.NewHTTPTransport(serverConfig)
 	if err != nil {
 		logger.Error(ctx, "~ prepare http transport error", logger.KV("error", err))
 		return ExitErr

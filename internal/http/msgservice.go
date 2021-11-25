@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/msgservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
@@ -12,12 +13,25 @@ import (
 	"github.com/yusufsyaifudin/ngendika/pkg/uid"
 )
 
-type HandlerMessageService struct {
+type HandlerMessageServiceConfig struct {
 	UID                  uid.UID                      `validate:"required"`
 	ResponseConstructor  response.HTTPRespConstructor `validate:"required"`
 	ResponseWriter       response.Writer              `validate:"required"`
 	MsgServiceDispatcher msgservice.Service           `validate:"required"`
 	MsgServiceProcessor  msgservice.Service           `validate:"required"`
+}
+
+type HandlerMessageService struct {
+	Config HandlerMessageServiceConfig
+}
+
+func NewHandlerMessageService(config HandlerMessageServiceConfig) (*HandlerMessageService, error) {
+	err := validator.New().Struct(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &HandlerMessageService{Config: config}, nil
 }
 
 func (h *HandlerMessageService) SendMessage(w http.ResponseWriter, r *http.Request) {
@@ -39,20 +53,20 @@ func (h *HandlerMessageService) SendMessage(w http.ResponseWriter, r *http.Reque
 	dec.DisallowUnknownFields()
 	err := dec.Decode(&reqBody)
 	if err != nil {
-		resp := h.ResponseConstructor.HTTPError(ctx, response.ErrValidation, err)
-		h.ResponseWriter.JSON(http.StatusBadRequest, w, r, resp)
+		resp := h.Config.ResponseConstructor.HTTPError(ctx, response.ErrValidation, err)
+		h.Config.ResponseWriter.JSON(http.StatusBadRequest, w, r, resp)
 		return
 	}
 
 	var taskResult *msgservice.TaskResult
 
 	var msgServiceProcess msgservice.Process
-	msgServiceProcess = h.MsgServiceDispatcher.Process()
+	msgServiceProcess = h.Config.MsgServiceDispatcher.Process()
 	if reqBody.Sync {
-		msgServiceProcess = h.MsgServiceProcessor.Process()
+		msgServiceProcess = h.Config.MsgServiceProcessor.Process()
 	}
 
-	uuid, err := h.UID.NextID()
+	uuid, err := h.Config.UID.NextID()
 	if err != nil {
 		return
 	}
@@ -69,11 +83,11 @@ func (h *HandlerMessageService) SendMessage(w http.ResponseWriter, r *http.Reque
 	})
 
 	if err != nil {
-		resp := h.ResponseConstructor.HTTPError(ctx, response.ErrUnhandled, err)
-		h.ResponseWriter.JSON(http.StatusOK, w, r, resp)
+		resp := h.Config.ResponseConstructor.HTTPError(ctx, response.ErrUnhandled, err)
+		h.Config.ResponseWriter.JSON(http.StatusOK, w, r, resp)
 	}
 
-	resp := h.ResponseConstructor.HTTPSuccess(ctx, taskResult)
-	h.ResponseWriter.JSON(http.StatusOK, w, r, resp)
+	resp := h.Config.ResponseConstructor.HTTPSuccess(ctx, taskResult)
+	h.Config.ResponseWriter.JSON(http.StatusOK, w, r, resp)
 	return
 }

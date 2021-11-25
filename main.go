@@ -12,9 +12,11 @@ import (
 )
 
 func main() {
-	apiCmd := api.NewCmd()
+	const appName, appVersion = "ngendika", "1.0.0"
 
-	c := cli.NewCLI("ngendika", "1.0.0")
+	apiCmd := api.NewCmd(appName, appVersion)
+
+	c := cli.NewCLI(appName, appVersion)
 	c.Args = os.Args[1:]
 	c.Autocomplete = true
 	c.Commands = map[string]cli.CommandFactory{
