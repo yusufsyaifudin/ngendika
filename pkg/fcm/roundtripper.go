@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
@@ -69,13 +70,28 @@ func (r *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		errStr = err.Error()
 	}
 
+	var toSimpleMap = func(h http.Header) map[string]string {
+		out := map[string]string{}
+		for k, v := range h {
+			out[k] = strings.Join(v, " ")
+		}
+
+		return out
+	}
+
 	// log outgoing request
 	logger.Access(ctx, logger.AccessLogData{
-		Path:        req.URL.String(),
-		ReqBody:     string(reqBody),
-		RespBody:    string(respBody),
+		Path: req.URL.String(),
+		Request: logger.HTTPData{
+			Header:     toSimpleMap(req.Header),
+			DataString: string(reqBody),
+		},
+		Response: logger.HTTPData{
+			Header:     toSimpleMap(resp.Header),
+			DataString: string(respBody),
+		},
 		Error:       errStr,
-		ElapsedTime: time.Since(t0).Nanoseconds(),
+		ElapsedTime: time.Since(t0).Milliseconds(),
 	})
 
 	return resp, err

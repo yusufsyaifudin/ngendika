@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,7 @@ import (
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
 	"github.com/yusufsyaifudin/ngendika/pkg/uid"
+	"go.uber.org/multierr"
 )
 
 const (
@@ -116,19 +118,19 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			r = r.WithContext(ctx)
 
 			reqBody := make([]byte, 0)
-			var reqBodyData interface{}
+			var reqBodyObj interface{} = map[string]interface{}{}
 			if r.Body != nil {
 				reqBody, err = ioutil.ReadAll(r.Body)
 				if err != nil {
-					logger.Error(ctx, "error read request body", logger.KV("error", err))
+					err = multierr.Append(err, fmt.Errorf("error read request body: %w", err))
 					reqBody = []byte(``)
 				}
 
 				r.Body = ioutil.NopCloser(bytes.NewBuffer(reqBody))
 			}
 
-			if _err := json.Unmarshal(reqBody, &reqBodyData); _err != nil {
-				reqBodyData = string(reqBody)
+			if _err := json.Unmarshal(reqBody, &reqBodyObj); _err != nil {
+				err = multierr.Append(err, fmt.Errorf("error marshal request body: %w", _err))
 			}
 
 			// continue serve, and record the response
@@ -140,7 +142,7 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			if rec.Result().Body != nil {
 				respBody, err = ioutil.ReadAll(rec.Result().Body)
 				if err != nil {
-					logger.Error(ctx, "error read response body", logger.KV("error", err))
+					err = multierr.Append(err, fmt.Errorf("error read response body: %w", err))
 					respBody = []byte(``)
 				}
 
@@ -149,37 +151,47 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 
 			var respBodyData interface{} = map[string]interface{}{}
 			if _err := json.Unmarshal(respBody, &respBodyData); _err != nil {
-				respBodyData = map[string]interface{}{
-					"raw_response_body": respBodyData,
-					"error":             _err,
-				}
+				err = multierr.Append(err, fmt.Errorf("error marshal response body: %w", _err))
 			}
 
 			for k, v := range rec.Result().Header {
 				w.Header()[k] = v
 			}
 
+			var toSimpleMap = func(h http.Header) map[string]string {
+				out := map[string]string{}
+				for k, v := range h {
+					out[k] = strings.Join(v, " ")
+				}
+
+				return out
+			}
+
 			w.WriteHeader(rec.Code)
 			_, err = bytes.NewReader(respBody).WriteTo(w)
 			if err != nil {
-				err = fmt.Errorf("write response body error: %w", err)
+				err = multierr.Append(err, fmt.Errorf("error write response body: %w", err))
+			}
 
-				logger.Access(ctx, logger.AccessLogData{
-					Path:        r.URL.Path,
-					ReqBody:     reqBodyData,
-					RespBody:    respBodyData,
-					Error:       err.Error(),
-					ElapsedTime: time.Since(t1).Milliseconds(),
-				})
-
-				return
+			errStr := ""
+			if err != nil {
+				errStr = err.Error()
 			}
 
 			// log request
 			logger.Access(ctx, logger.AccessLogData{
-				Path:        r.RequestURI,
-				ReqBody:     reqBodyData,
-				RespBody:    respBodyData,
+				Path: r.RequestURI,
+				Request: logger.HTTPData{
+					Header:     toSimpleMap(r.Header),
+					DataObject: reqBodyObj,
+					DataString: string(reqBody),
+				},
+				Response: logger.HTTPData{
+					Header:     toSimpleMap(rec.Header()),
+					DataObject: respBodyData,
+					DataString: string(respBody),
+				},
+				Error:       errStr,
 				ElapsedTime: time.Since(t1).Milliseconds(),
 			})
 		})

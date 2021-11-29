@@ -66,6 +66,7 @@ func (c *ClientDefault) SendMulticast(ctx context.Context, key []byte, message *
 		Source: cred.TokenSource,
 	}
 
+	// don't reuse client because each client have different token source
 	httpClient := &http.Client{
 		Transport: httpTransport,
 	}

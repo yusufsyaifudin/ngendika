@@ -12,12 +12,18 @@ type Logger interface {
 	Access(ctx context.Context, data AccessLogData)
 }
 
+type HTTPData struct {
+	Header     map[string]string `json:"header,omitempty"`
+	DataObject interface{}       `json:"data_object,omitempty"`
+	DataString string            `json:"data_string,omitempty"`
+}
+
 type AccessLogData struct {
-	Path        string      `json:"path,omitempty"`
-	ReqBody     interface{} `json:"req_body,omitempty"`
-	RespBody    interface{} `json:"resp_body,omitempty"`
-	Error       string      `json:"error,omitempty"`
-	ElapsedTime int64       `json:"elapsed_time,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Request     HTTPData `json:"request,omitempty"`
+	Response    HTTPData `json:"response,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	ElapsedTime int64    `json:"elapsed_time,omitempty"`
 }
 
 type KeyValue struct {
