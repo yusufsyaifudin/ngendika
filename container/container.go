@@ -38,7 +38,10 @@ var _ Container = (*DefaultContainerImpl)(nil)
 // the reason is when Setup called it must be close in deferred mode, any passed value using interface
 // won't let user Close any dependencies during run-time.
 func Setup(ctx context.Context, conf *config.Config) (*DefaultContainerImpl, error) {
-	dbSqlConn, err := NewSqlDbConnMaker(ctx, conf.Database)
+	dbSqlConn, err := NewSqlDbConnMaker(SqlDbConnMakerConfig{
+		Ctx:    ctx,
+		Config: conf.Database,
+	})
 	if err != nil {
 		return nil, err
 	}

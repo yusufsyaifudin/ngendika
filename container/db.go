@@ -13,6 +13,11 @@ import (
 	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 )
 
+type SqlDbConnMakerConfig struct {
+	Ctx    context.Context `validate:"required"`
+	Config config.Database `validate:"required"`
+}
+
 type SqlDbConnMaker struct {
 	ctx    context.Context
 	conf   config.Database
@@ -20,15 +25,21 @@ type SqlDbConnMaker struct {
 	closer []Closer
 }
 
-func NewSqlDbConnMaker(ctx context.Context, conf config.Database) (*SqlDbConnMaker, error) {
+func NewSqlDbConnMaker(conf SqlDbConnMakerConfig) (*SqlDbConnMaker, error) {
+	err := validator.New().Struct(conf)
+	if err != nil {
+		err = fmt.Errorf("sql db connection maker failed: %w", err)
+		return nil, err
+	}
+
 	instance := &SqlDbConnMaker{
-		ctx:    ctx,
-		conf:   conf,
+		ctx:    conf.Ctx,
+		conf:   conf.Config,
 		dbSQL:  make(map[string]*sqlx.DB),
 		closer: make([]Closer, 0),
 	}
 
-	err := instance.connect()
+	err = instance.connect()
 	if err != nil {
 		// close previous opened connection if error happen
 		if _err := instance.CloseAll(); _err != nil {

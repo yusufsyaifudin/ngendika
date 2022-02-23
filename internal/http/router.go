@@ -206,7 +206,9 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 		r.Get("/", todoHandler)               // list of apps
 		r.Put("/{client_id}", todoHandler)    // modify some field in apps (support patching)
 		r.Delete("/{client_id}", todoHandler) // delete apps
+	})
 
+	router.Route("/apps/{client_id}", func(r chi.Router) {
 		r.Get("/fcm", handlerFCM.List())          // get all fcm cert
 		r.Get("/fcm/{fcm_id}", handlerFCM.List()) // get one fcm cert
 		r.Post("/fcm", handlerFCM.Upload())       // add fcm cert

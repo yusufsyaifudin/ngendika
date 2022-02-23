@@ -11,6 +11,9 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// Setup need config file name and pointer to struct to hold the configuration value.
+// It only supports YAML file content.
+// Zap logger also returned to make sure that all binaries share the same key in log output.
 func Setup(configFile string, s interface{}) (*zap.Logger, error) {
 	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(zapcore.EncoderConfig{
