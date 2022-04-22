@@ -12,7 +12,7 @@ const firebaseConfig = {
 
 // Initialize Firebase with a default Firebase project
 let project = firebase.initializeApp(firebaseConfig);
-project.analytics();
+// project.analytics();
 
 // Retrieve Firebase Messaging object.
 const messaging = project.messaging();

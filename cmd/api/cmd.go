@@ -11,6 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/yusufsyaifudin/ngendika/pkg/tracer"
+	"github.com/yusufsyaifudin/ylog"
+
 	HTTPServer "github.com/yusufsyaifudin/ngendika/internal/http"
 
 	"github.com/go-resty/resty/v2"
@@ -23,8 +28,6 @@ import (
 	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/msgservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
-	"github.com/yusufsyaifudin/ngendika/pkg/logger"
-	"github.com/yusufsyaifudin/ngendika/pkg/pubsub"
 )
 
 const (
@@ -37,6 +40,8 @@ type Cmd struct {
 	appName    string
 	appVersion string
 	configFile string
+	cfg        *config.Config
+	zapLog     *zap.Logger
 }
 
 func NewCmd(appName, appVersion string) func() (cli.Command, error) {
@@ -60,6 +65,16 @@ func (c *Cmd) init() error {
 		"Config file to load")
 	c.flags.StringVar(&c.configFile, "c", "config.yml",
 		"Alias for config file to load")
+
+	// ** load config file
+	zapLog, err := config.Setup(c.configFile, &c.cfg)
+	if err != nil {
+		err = fmt.Errorf("error load config: %w", err)
+		return err
+	}
+
+	c.zapLog = zapLog
+
 	return nil
 }
 
@@ -78,55 +93,56 @@ func (c *Cmd) Run(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	ctx = logger.Inject(ctx, logger.Tracer{
+	propagateData := tracer.Data{
 		RemoteAddr: "system",
-		AppTraceID: uuid.NewV4().String(),
-	})
+		TraceID:    uuid.NewV4().String(),
+	}
 
-	// ** load config file
-	configVal := &config.Config{}
-	zapLog, err := config.Setup(c.configFile, configVal)
+	traceLog, err := ylog.NewTracer(propagateData, ylog.WithTag("tracer"))
 	if err != nil {
-		log.Fatalf("error load config: %s", err)
+		log.Fatalf("error prepare tracer system data: %s", err)
 		return ExitErr
 	}
+
+	// inject context
+	ctx = ylog.Inject(ctx, traceLog)
 
 	// ** set global logger
-	logger.SetGlobalLogger(logger.NewZap(zapLog))
+	ylog.SetGlobalLogger(ylog.NewZap(c.zapLog))
 
-	logger.Info(ctx, "config is loaded and logger is prepared")
-	logger.Info(ctx, "container preparation: starting")
-	defaultContainer, err := container.Setup(ctx, configVal)
+	ylog.Info(ctx, "config is loaded and logger is prepared")
+	ylog.Info(ctx, "container preparation: starting")
+	defaultContainer, err := container.Setup(ctx, c.cfg)
 	if err != nil {
-		logger.Error(ctx, "container preparation: failed", logger.KV("error", err))
+		ylog.Error(ctx, "container preparation: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	logger.Info(ctx, "container preparation: done")
+	ylog.Info(ctx, "container preparation: done")
 	defer func() {
-		logger.Info(ctx, "trying closing container")
+		ylog.Info(ctx, "trying closing container")
 		if _err := defaultContainer.Close(); _err != nil {
-			logger.Error(ctx, "error close container", logger.KV("error", _err))
+			ylog.Error(ctx, "error close container", ylog.KV("error", _err))
 		}
 	}()
 
 	// ** START DEPENDENCIES
-	logger.Info(ctx, "dependencies preparation: starting")
-	logger.Info(ctx, "app repository: starting")
+	ylog.Info(ctx, "dependencies preparation: starting")
+	ylog.Info(ctx, "app repository: starting")
 	appRepo, err := defaultContainer.AppRepo()
 	if err != nil {
-		logger.Error(ctx, "app repository: failed", logger.KV("error", err))
+		ylog.Error(ctx, "app repository: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	logger.Info(ctx, "fcm repository: starting")
+	ylog.Info(ctx, "fcm repository: starting")
 	fcmRepo, err := defaultContainer.FCMRepo()
 	if err != nil {
-		logger.Error(ctx, "fcm repository: failed", logger.KV("error", err))
+		ylog.Error(ctx, "fcm repository: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	logger.Info(ctx, "dependencies preparation: done")
+	ylog.Info(ctx, "dependencies preparation: done")
 
 	// ** UUID function
 	uuidFunc := sonyflake.NewSonyflake(sonyflake.Settings{
@@ -134,138 +150,71 @@ func (c *Cmd) Run(args []string) int {
 	})
 
 	// ** PREPARE CLIENTS
-	logger.Info(ctx, "client(s) preparation: starting")
-	logger.Info(ctx, "fcm client: starting")
-	fcmClient, err := fcm.NewClient()
+	ylog.Info(ctx, "client(s) preparation: starting")
+	ylog.Info(ctx, "fcm client: starting")
+	var fcmClient fcm.Client
+	fcmClient, err = fcm.NewClient()
 	if err != nil {
-		logger.Error(ctx, "fcm client: failed", logger.KV("error", err))
+		ylog.Error(ctx, "fcm client: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	logger.Info(ctx, "client(s) preparation: done")
+	ylog.Info(ctx, "client(s) preparation: done")
 
 	// ** START SERVICES
-	logger.Info(ctx, "services preparation: starting")
-	logger.Info(ctx, "APP service: starting")
+	ylog.Info(ctx, "services preparation: starting")
+	ylog.Info(ctx, "APP service: starting")
 	appService, err := appservice.New(appservice.DefaultServiceConfig{
 		AppRepo: appRepo,
 	})
 	if err != nil {
-		logger.Error(ctx, "app service: failed", logger.KV("error", err))
+		ylog.Error(ctx, "app service: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	logger.Info(ctx, "FCM service: starting")
+	ylog.Info(ctx, "FCM service: starting")
 	fcmService, err := fcmservice.New(fcmservice.DefaultServiceConfig{
 		FCMRepo:    fcmRepo,
 		AppService: appService,
+		FCMClient:  fcmClient,
 	})
 	if err != nil {
-		logger.Error(ctx, "FCM service: failed", logger.KV("error", err))
+		ylog.Error(ctx, "FCM service: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	logger.Info(ctx, "message service processor: starting")
+	ylog.Info(ctx, "message service processor: starting")
 	msgServiceProcessor, err := msgservice.NewProcessor(msgservice.ProcessorConfig{
 		FCMService: fcmService,
-		FCMClient:  fcmClient,
 		RESTClient: resty.New(),
+		MaxWorker:  c.cfg.MsgService.MaxParallel,
 	})
 	if err != nil {
-		logger.Error(ctx, "message service processor: failed", logger.KV("error", err))
+		ylog.Error(ctx, "message service processor: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	// default using sync mode unless queue enabled
-	var msgServiceDispatcher msgservice.Service = msgServiceProcessor
-
-	if !configVal.MsgService.QueueDisable {
-		logger.Info(ctx, "message service dispatcher: starting",
-			logger.KV("queueType", configVal.MsgService.QueueType),
-		)
-
-		var pubSubMsgService pubsub.IPublisher
-
-		switch configVal.MsgService.QueueType {
-		case "redis":
-			// pubsub can only support redis with single architecture
-			redisConn, err := defaultContainer.GetRedis().GetSingle(configVal.MsgService.QueueIdentifier)
-			if err != nil {
-				err = fmt.Errorf("message service with type redis %s: get connection error: %w",
-					configVal.MsgService.QueueIdentifier, err)
-
-				logger.Error(ctx, "message service dispatcher: failed", logger.KV("error", err))
-				return ExitErr
-			}
-
-			pubSubMsgService, err = pubsub.NewRedis(pubsub.RedisConfig{
-				Context:       ctx,
-				QueueName:     "producer",
-				CleanUpTicker: time.Hour,
-				Concurrency:   configVal.Worker.Num,
-				RedisClient:   redisConn,
-			})
-
-			if err != nil {
-				logger.Error(ctx, "message service dispatcher: failed", logger.KV("error", err))
-				return ExitErr
-			}
-
-		default:
-			err = fmt.Errorf("pubsub with type %s is unknown", configVal.MsgService.QueueType)
-
-			logger.Error(ctx, "error preparing message service dispatcher",
-				logger.KV("error", err),
-			)
-			return ExitErr
-		}
-
-		defer func() {
-			logger.Info(ctx, "message service dispatcher: trying to close",
-				logger.KV("queueType", configVal.MsgService.QueueType),
-			)
-
-			if _err := pubSubMsgService.Shutdown(ctx); _err != nil {
-				logger.Error(ctx, "message service dispatcher: shutdown failed", logger.KV("error", _err))
-			}
-		}()
-
-		// ** prepare message dispatcher
-		msgServiceDispatcher, err = msgservice.NewDispatcher(msgservice.DispatcherConfig{
-			Publisher: pubSubMsgService,
-		})
-		if err != nil {
-			logger.Error(ctx, "message service dispatcher: failed", logger.KV("error", err))
-			return ExitErr
-		}
-
-		logger.Info(ctx, "message service dispatcher: done",
-			logger.KV("queueType", configVal.MsgService.QueueType),
-		)
-	}
-
-	logger.Info(ctx, "transport preparation: starting")
+	ylog.Info(ctx, "transport preparation: starting")
 
 	// ** HTTP TRANSPORT
 	serverConfig := HTTPServer.Config{
-		AppServiceName:    c.appName,
-		AppVersion:        c.appVersion,
-		DebugError:        true,
-		UID:               uuidFunc,
-		AppService:        appService,
-		FCMService:        fcmService,
-		MessageProcessor:  msgServiceProcessor,
-		MessageDispatcher: msgServiceDispatcher,
+		AppServiceName:   c.appName,
+		AppVersion:       c.appVersion,
+		DebugError:       true,
+		UID:              uuidFunc,
+		AppService:       appService,
+		FCMService:       fcmService,
+		MessageProcessor: msgServiceProcessor,
 	}
 
-	logger.Info(ctx, "http transport: starting")
+	ylog.Info(ctx, "http transport: starting")
 	server, err := HTTPServer.NewHTTPTransport(serverConfig)
 	if err != nil {
-		logger.Error(ctx, "http transport: failed", logger.KV("error", err))
+		ylog.Error(ctx, "http transport: failed", ylog.KV("error", err))
 		return ExitErr
 	}
 
-	httpPort := fmt.Sprintf(":%d", configVal.Transport.HTTP.Port)
+	httpPort := fmt.Sprintf(":%d", c.cfg.Transport.HTTP.Port)
 	httpServer := &http.Server{
 		Addr:    httpPort,
 		Handler: server.Server(),
@@ -273,26 +222,26 @@ func (c *Cmd) Run(args []string) int {
 
 	var apiErrChan = make(chan error, 1)
 	go func() {
-		logger.Info(ctx, fmt.Sprintf("http transport: done running on port %d", configVal.Transport.HTTP.Port))
+		ylog.Info(ctx, fmt.Sprintf("http transport: done running on port %d", c.cfg.Transport.HTTP.Port))
 		apiErrChan <- httpServer.ListenAndServe()
 	}()
 
-	logger.Info(ctx, "system: up and running...")
+	ylog.Info(ctx, "system: up and running...")
 
 	// ** listen for sigterm signal
 	var signalChan = make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	select {
 	case <-signalChan:
-		logger.Info(ctx, "system: exiting...")
-		logger.Info(ctx, "http transport: exiting...")
+		ylog.Info(ctx, "system: exiting...")
+		ylog.Info(ctx, "http transport: exiting...")
 		if _err := httpServer.Shutdown(ctx); _err != nil {
-			logger.Error(ctx, "http transport: ", logger.KV("error", _err))
+			ylog.Error(ctx, "http transport: ", ylog.KV("error", _err))
 		}
 
 	case err := <-apiErrChan:
 		if err != nil {
-			logger.Info(ctx, "http transport: error", logger.KV("error", err))
+			ylog.Info(ctx, "http transport: error", ylog.KV("error", err))
 		}
 	}
 

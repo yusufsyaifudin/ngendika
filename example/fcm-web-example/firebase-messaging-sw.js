@@ -21,7 +21,12 @@ const firebaseConfig = {
 // your app's Firebase config object.
 // https://firebase.google.com/docs/web/setup#config-object
 let project = firebase.initializeApp(firebaseConfig);
-project.analytics();
+
+// comment because sometimes this cause error
+// @firebase/analytics: Analytics: Firebase Analytics is not supported in this environment.
+// Wrap initialization of analytics in analytics.isSupported() to prevent initialization in unsupported environments.
+// Details: (1) Cookies are not available. (analytics/invalid-analytics-context).
+// project.analytics();
 
 // Retrieve an instance of Firebase Messaging so that it can handle background
 // messages.
@@ -35,12 +40,15 @@ messaging.setBackgroundMessageHandler(function (payload) {
 
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('../firebase-messaging-sw.js')
-    .then(function (registration) {
-      document.getElementById("log").innerHTML = `Registration successful, scope is: ${registration}`;
-      console.log('Registration successful, scope is:', registration.scope);
-    }).catch(function (err) {
-      document.getElementById("log").innerHTML = `Service worker registration failed, error: ${err}`;
-      console.log('Service worker registration failed, error:', err);
-    });
+  navigator.serviceWorker
+      .register('../firebase-messaging-sw.js', {
+        scope: "./",
+      })
+      .then(function (registration) {
+        document.getElementById("log").innerHTML = `Registration successful, scope is: ${registration}`;
+        console.log('Registration successful, scope is:', registration.scope);
+      }).catch(function (err) {
+        document.getElementById("log").innerHTML = `Service worker registration failed, error: ${err}`;
+        console.log('Service worker registration failed, error:', err);
+      });
 }

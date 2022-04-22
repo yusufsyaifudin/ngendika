@@ -38,7 +38,6 @@ type Job interface {
 
 type Service interface {
 	AddJob(job Job)
-	WaitJob(job Job)
 }
 
 type Worker struct {
@@ -131,13 +130,6 @@ func (w *Worker) AddJob(job Job) {
 	w.waitGroup.Add(1)
 	w.JobQueue <- job
 	atomic.AddInt64(&w.JobQueueNum, 1)
-}
-
-func (w *Worker) WaitJob(job Job) {
-	doneChan := make(chan struct{})
-	job.Execute()
-	close(doneChan)
-	<-doneChan
 }
 
 // Done ensures all registered Job is done before stop the worker.

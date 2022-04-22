@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
-	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
+	"github.com/yusufsyaifudin/ylog"
 )
 
 type HandlerFCMServiceConfig struct {
@@ -68,8 +70,8 @@ func (h *HandlerFCMService) List() func(http.ResponseWriter, *http.Request) {
 		for _, v := range out.Lists {
 			var svcAccKey interface{}
 			if _err := json.Unmarshal(v.ServiceAccountKey, &svcAccKey); _err != nil {
-				logger.Error(ctx, fmt.Sprintf("error unmarshal fcm service account %s", v.ID),
-					logger.KV("error", _err),
+				ylog.Error(ctx, fmt.Sprintf("error unmarshal fcm service account %s", v.ID),
+					ylog.KV("error", _err),
 				)
 				continue
 			}
@@ -97,8 +99,10 @@ func (h *HandlerFCMService) Upload() func(w http.ResponseWriter, r *http.Request
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		clientID := r.PostFormValue("client_id")
-		file, fileHeader, err := r.FormFile("file") // default Go 32MB
+		clientID := chi.RouteContext(ctx).URLParam("client_id")
+
+		// default Go 32MB https://cs.opensource.google/go/go/+/refs/tags/go1.18:src/net/http/request.go;l=1376
+		file, fileHeader, err := r.FormFile("file")
 		if err != nil {
 			resp := h.Config.ResponseConstructor.HTTPError(ctx, response.ErrValidation, err)
 			h.Config.ResponseWriter.JSON(http.StatusBadRequest, w, r, resp)
@@ -111,7 +115,7 @@ func (h *HandlerFCMService) Upload() func(w http.ResponseWriter, r *http.Request
 			}
 
 			if _err := file.Close(); _err != nil {
-				logger.Error(ctx, "failed close uploaded file", logger.KV("error", _err))
+				ylog.Error(ctx, "failed close uploaded file", ylog.KV("error", _err))
 			}
 		}()
 
@@ -141,8 +145,8 @@ func (h *HandlerFCMService) Upload() func(w http.ResponseWriter, r *http.Request
 		var fcmSvcAccKey interface{} = map[string]interface{}{} // default to empty object
 		err = json.Unmarshal(out.ServiceAccountKey, &fcmSvcAccKey)
 		if err != nil {
-			logger.Error(ctx, fmt.Sprintf("error unmarshal fcm service account %s", out.ID),
-				logger.KV("error", err),
+			ylog.Error(ctx, fmt.Sprintf("error unmarshal fcm service account %s", out.ID),
+				ylog.KV("error", err),
 			)
 
 			err = nil // discard error and continue to response

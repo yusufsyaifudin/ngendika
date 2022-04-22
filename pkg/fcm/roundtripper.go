@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yusufsyaifudin/ngendika/pkg/logger"
+	"github.com/yusufsyaifudin/ylog"
 	"go.uber.org/multierr"
 )
 
@@ -80,13 +80,13 @@ func (r *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// log outgoing request
-	logger.Access(ctx, logger.AccessLogData{
+	ylog.Access(ctx, ylog.AccessLogData{
 		Path: req.URL.String(),
-		Request: logger.HTTPData{
+		Request: ylog.HTTPData{
 			Header:     toSimpleMap(req.Header),
 			DataString: string(reqBody),
 		},
-		Response: logger.HTTPData{
+		Response: ylog.HTTPData{
 			Header:     toSimpleMap(resp.Header),
 			DataString: string(respBody),
 		},

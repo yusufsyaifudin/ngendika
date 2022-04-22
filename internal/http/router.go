@@ -10,6 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yusufsyaifudin/ylog"
+
+	"github.com/yusufsyaifudin/ngendika/pkg/tracer"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/httptracer"
 	"github.com/go-playground/validator/v10"
@@ -18,7 +22,6 @@ import (
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/msgservice"
-	"github.com/yusufsyaifudin/ngendika/pkg/logger"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
 	"github.com/yusufsyaifudin/ngendika/pkg/uid"
 	"go.uber.org/multierr"
@@ -32,12 +35,11 @@ type Config struct {
 	AppServiceName string `validate:"required"`
 	AppVersion     string `validate:"required"`
 
-	DebugError        bool
-	UID               uid.UID            `validate:"required"`
-	AppService        appservice.Service `validate:"required"`
-	FCMService        fcmservice.Service `validate:"required"`
-	MessageProcessor  msgservice.Service `validate:"required"`
-	MessageDispatcher msgservice.Service `validate:"required"`
+	DebugError       bool
+	UID              uid.UID            `validate:"required"`
+	AppService       appservice.Service `validate:"required"`
+	FCMService       fcmservice.Service `validate:"required"`
+	MessageProcessor msgservice.Service `validate:"required"`
 }
 
 type defaultHTTP struct {
@@ -72,11 +74,10 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	}
 
 	handlerMessage, err := NewHandlerMessageService(HandlerMessageServiceConfig{
-		UID:                  config.UID,
-		ResponseConstructor:  respConstructor,
-		ResponseWriter:       respWriter,
-		MsgServiceDispatcher: config.MessageDispatcher,
-		MsgServiceProcessor:  config.MessageProcessor,
+		UID:                 config.UID,
+		ResponseConstructor: respConstructor,
+		ResponseWriter:      respWriter,
+		MsgServiceProcessor: config.MessageProcessor,
 	})
 
 	if err != nil {
@@ -104,9 +105,17 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			ctx := r.Context()
 
 			traceID := uuid.NewV4().String()
-			loggerTracer := logger.Tracer{
+
+			propagateData := tracer.Data{
 				RemoteAddr: r.RemoteAddr,
-				AppTraceID: traceID,
+				TraceID:    traceID,
+			}
+
+			var logTraceData *ylog.Tracer
+			logTraceData, err = ylog.NewTracer(propagateData, ylog.WithTag("tracer"))
+			if err != nil {
+				// this should never happen, but once it happens, we need to log in the response
+				err = multierr.Append(err, fmt.Errorf("error prepare log tracer data: %w", err))
 			}
 
 			responseTracer := response.Tracer{
@@ -114,7 +123,7 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 				AppTraceID: traceID,
 			}
 
-			ctx = Inject(ctx, loggerTracer, responseTracer)
+			ctx = Inject(ctx, logTraceData, responseTracer)
 			r = r.WithContext(ctx)
 
 			reqBody := make([]byte, 0)
@@ -179,14 +188,14 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 			}
 
 			// log request
-			logger.Access(ctx, logger.AccessLogData{
+			ylog.Access(ctx, ylog.AccessLogData{
 				Path: r.RequestURI,
-				Request: logger.HTTPData{
+				Request: ylog.HTTPData{
 					Header:     toSimpleMap(r.Header),
 					DataObject: reqBodyObj,
 					DataString: string(reqBody),
 				},
-				Response: logger.HTTPData{
+				Response: ylog.HTTPData{
 					Header:     toSimpleMap(rec.Header()),
 					DataObject: respBodyData,
 					DataString: string(respBody),
@@ -220,7 +229,7 @@ func NewHTTPTransport(config Config) (*defaultHTTP, error) {
 	})
 
 	router.Route("/messages", func(r chi.Router) {
-		r.Post("/", handlerMessage.SendMessage) // send message
+		r.Post("/", handlerMessage.SendMessage()) // send message
 	})
 
 	instance := &defaultHTTP{

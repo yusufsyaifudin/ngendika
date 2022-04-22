@@ -8,7 +8,6 @@ import (
 
 	"github.com/mitchellh/cli"
 	"github.com/yusufsyaifudin/ngendika/cmd/api"
-	"github.com/yusufsyaifudin/ngendika/cmd/worker"
 )
 
 func main() {
@@ -20,9 +19,8 @@ func main() {
 	c.Args = os.Args[1:]
 	c.Autocomplete = true
 	c.Commands = map[string]cli.CommandFactory{
-		"":       apiCmd, // default command if no subcommand defined
-		"api":    apiCmd,
-		"worker": worker.NewCmd(),
+		"":    apiCmd, // default command if no subcommand defined
+		"api": apiCmd,
 	}
 
 	exitStatus, err := c.Run()

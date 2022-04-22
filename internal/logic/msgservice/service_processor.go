@@ -2,24 +2,26 @@ package msgservice
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/go-resty/resty/v2"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/fcmservice"
-	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
+	"golang.org/x/sync/semaphore"
 )
 
 type ProcessorConfig struct {
 	FCMService fcmservice.Service `validate:"required"`
-
-	FCMClient  fcm.Client    `validate:"required"`
-	RESTClient *resty.Client `validate:"required"`
+	RESTClient *resty.Client      `validate:"required"`
+	MaxWorker  int                `validate:"required,min=1"`
 }
 
 type Processor struct {
 	Config ProcessorConfig
+	sem    *semaphore.Weighted
 }
 
 var _ Service = (*Processor)(nil)
@@ -32,20 +34,17 @@ func NewProcessor(conf ProcessorConfig) (*Processor, error) {
 
 	return &Processor{
 		Config: conf,
+		sem:    semaphore.NewWeighted(int64(conf.MaxWorker)),
 	}, nil
 }
 
 func (p *Processor) Process() Process {
 	return func(ctx context.Context, task *Task) (out *TaskResult, err error) {
-		err = validator.New().Struct(task)
-		if err != nil {
-			return nil, err
-		}
 
 		var (
-			outFCMMulticast    *FCMMulticastOutput
+			outFCMMulticast    *fcmservice.FCMMulticastOutput
 			outFCMMulticastErr error
-			outFCMLegacy       *FCMLegacyOutput
+			outFCMLegacy       *fcmservice.FCMLegacyOutput
 			outFCMLegacyErr    error
 			outWebhook         *WebhookOutput
 			outWebhookErr      error
@@ -53,33 +52,72 @@ func (p *Processor) Process() Process {
 
 		// perform task on each payload
 		wg := sync.WaitGroup{}
-		wg.Add(3)
 
-		go func() {
-			defer wg.Done()
-			outFCMMulticast, outFCMMulticastErr = p.FcmMulticast(ctx, &FcmMulticastInput{
-				AppClientID: task.ClientID,
-				Payload:     task.Message.FCMMulticast,
-			})
-		}()
+		if task.Message.FCMMulticast != nil {
+			err = p.sem.Acquire(ctx, 1)
+			if err != nil {
+				err = fmt.Errorf("cannot acquire semaphore: %w", err)
+				return
+			}
 
-		go func() {
-			defer wg.Done()
+			wg.Add(1)
 
-			outFCMLegacy, outFCMLegacyErr = p.FcmLegacy(ctx, &FcmLegacyInput{
-				AppClientID: task.ClientID,
-				Payload:     task.Message.FCMLegacy,
-			})
-		}()
+			go func() {
+				defer func() {
+					wg.Done()
+					p.sem.Release(1)
+				}()
 
-		go func() {
-			defer wg.Done()
+				outFCMMulticast, outFCMMulticastErr = p.Config.FCMService.FcmMulticast(ctx, &fcmservice.FcmMulticastInput{
+					AppClientID: task.ClientID,
+					Payload:     task.Message.FCMMulticast,
+				})
+			}()
+		}
 
-			outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
-				AppClientID: task.ClientID,
-				Webhook:     task.Message.Webhook,
-			})
-		}()
+		if task.Message.FCMLegacy != nil {
+			err = p.sem.Acquire(ctx, 1)
+			if err != nil {
+				err = fmt.Errorf("cannot acquire semaphore: %w", err)
+				return
+			}
+
+			wg.Add(1)
+
+			go func() {
+				defer func() {
+					wg.Done()
+					p.sem.Release(1)
+				}()
+
+				outFCMLegacy, outFCMLegacyErr = p.Config.FCMService.FcmLegacy(ctx, &fcmservice.FcmLegacyInput{
+					AppClientID: task.ClientID,
+					Payload:     task.Message.FCMLegacy,
+				})
+			}()
+		}
+
+		if task.Message.Webhook != nil && len(task.Message.Webhook) > 0 {
+			err = p.sem.Acquire(ctx, 1)
+			if err != nil {
+				err = fmt.Errorf("cannot acquire semaphore: %w", err)
+				return
+			}
+
+			wg.Add(1)
+
+			go func() {
+				defer func() {
+					wg.Done()
+					p.sem.Release(1)
+				}()
+
+				outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
+					AppClientID: task.ClientID,
+					Webhook:     task.Message.Webhook,
+				})
+			}()
+		}
 
 		// wait for all go routine to succeed
 		wg.Wait()
@@ -99,110 +137,31 @@ func (p *Processor) Process() Process {
 	}
 }
 
-func (p *Processor) FcmMulticast(ctx context.Context, input *FcmMulticastInput) (out *FCMMulticastOutput, err error) {
-	if input == nil {
-		return
-	}
-
-	err = validator.New().Struct(input)
-	if err != nil {
-		return
-	}
-
-	fcmService, err := p.Config.FCMService.GetSvcAccKey(ctx, fcmservice.GetSvcAccKeyIn{
-		ClientID: input.AppClientID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var multicastRes = make([]FCMMulticastResult, 0)
-	for _, serviceAccountKey := range fcmService.Lists {
-		batchRes, err := p.Config.FCMClient.SendMulticast(ctx, serviceAccountKey.ServiceAccountKey, input.Payload)
-		if err != nil {
-			multicastRes = append(multicastRes, FCMMulticastResult{
-				FCMKeyID: serviceAccountKey.ID,
-				Error:    err.Error(),
-			})
-			continue
-		}
-
-		multicastRes = append(multicastRes, FCMMulticastResult{
-			FCMKeyID:    serviceAccountKey.ID,
-			BatchResult: &batchRes,
-		})
-	}
-
-	// build final output
-	out = &FCMMulticastOutput{
-		Result: multicastRes,
-	}
-
-	return
-}
-
-func (p *Processor) FcmLegacy(ctx context.Context, input *FcmLegacyInput) (out *FCMLegacyOutput, err error) {
-	if input == nil {
-		return
-	}
-
-	err = validator.New().Struct(input)
-	if err != nil {
-		return
-	}
-
-	fcmServerKeys, err := p.Config.FCMService.GetServerKey(ctx, fcmservice.GetServerKeyIn{
-		ClientID: input.AppClientID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var legacyResp = make([]FCMLegacyResult, 0)
-
-	for _, key := range fcmServerKeys.Lists {
-		batchRes, err := p.Config.FCMClient.SendLegacy(ctx, key.ServerKey, input.Payload)
-		if err != nil {
-			legacyResp = append(legacyResp, FCMLegacyResult{
-				FCMKeyID: key.ID,
-				Error:    err.Error(),
-			})
-			continue
-		}
-
-		legacyResp = append(legacyResp, FCMLegacyResult{
-			FCMKeyID:    key.ID,
-			BatchResult: &batchRes,
-		})
-	}
-
-	// build final output
-	out = &FCMLegacyOutput{
-		Result: legacyResp,
-	}
-
-	return
-}
-
 func (p *Processor) Webhook(ctx context.Context, input *WebhookInput) (out *WebhookOutput, err error) {
-	if input == nil {
-		return
-	}
+	// skip webhook message because it is a slice not struct
+	newMsgWebhook := make([]TaskPayloadWebhook, 0)
+	for i, webhook := range input.Webhook {
+		err = validator.New().Struct(webhook)
+		if err != nil {
+			err = fmt.Errorf(
+				"some webhook payload index %d with reference id '%s' validation error: %w",
+				i, webhook.ReferenceID, err,
+			)
+			return
+		}
 
-	err = validator.New().Struct(input)
-	if err != nil {
-		return
+		newMsgWebhook = append(newMsgWebhook, webhook)
 	}
 
 	var webhookResult = make([]WebhookResult, 0)
-	for _, payload := range input.Webhook {
-
+	for _, payload := range newMsgWebhook {
 		header := map[string]string{}
 		for k, v := range payload.Header {
 			header[k] = strings.Join(v, " ")
 		}
 
-		req := p.Config.RESTClient.R().
+		req := p.Config.RESTClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true}).
+			R().
 			SetContext(ctx).
 			SetHeaders(header).
 			SetBody(payload.Body).
@@ -226,6 +185,13 @@ func (p *Processor) Webhook(ctx context.Context, input *WebhookInput) (out *Webh
 			Header:      resp.Header(),
 			Body:        string(resp.Body()),
 		})
+	}
+
+	if len(webhookResult) <= 0 {
+		// return nil if empty webhook results
+		out = nil
+		err = nil
+		return
 	}
 
 	// build output

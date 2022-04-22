@@ -6,10 +6,6 @@
 transport:
   http:
     port: 1234
-  udp:
-    port: 3334
-  grpc:
-    port: 5678
 
 # dependencies connection
 # note that key must be alphanumeric only, e.g: db1, postgre1, mysql1
@@ -21,55 +17,17 @@ database:
     driver: "postgres"
     dsn: "user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable" # Data Source Name
 
-## define redis connection
-redis:
-  redis1:
-    mode: single
-    address:
-      - localhost:6379
-    username: ""
-    password: ""
-    db: 0
-    masterName: ""
-
 # settings each repository, select based on dependencies connection
 ## appstore to save application information
 appRepo:
   database: db1 # refer to database
-  cache: false
-  cacheKeyPrefix: appStore
-  redis: redis1 # refer to redis
 
 fcmRepo:
   database: db1 # refer to database
-  cache: false
-  cacheKeyPrefix: appStore
-  redis: redis1 # refer to redis
 
 msgRepo:
   database: db1 # refer to database
-  cache: false
-  cacheKeyPrefix: msgStore
-  redis: redis1 # refer to redis
-
 
 ## service
 msgService:
-  queueDisable: false # if true, then use sync mode only
-  queueType: redis # redis
-  queueIdentifier: redis1
-
-# define worker
-# api need to define even though it required in worker config only
-# but for fallback mechanism, worker.num is required by API in case you disable msgService queue
-# the queueType and queueIdentifier must be the same as defined in msgService.
-# In case you specified different worker and msgService, your message may never be processed unless you are using
-# sync mode.
-worker:
-  queueType: redis # redis, kafka, etc
-  queueIdentifier: redis1 # refer to redis is queueType = redis, refer to kafka if queueType = kafka, and so on..
-  num: 10
-  handlerType:
-    - fcm
-    - apns
-    - webhook
+  maxParallel: 10 # number of semaphore to limit the number of goroutines working on parallel tasks

@@ -21,7 +21,7 @@ type ServiceAccountKey struct {
 	ClientID                string `json:"client_id" validate:"required"`
 	AuthURI                 string `json:"auth_uri" validate:"required"`
 	TokenURI                string `json:"token_uri" validate:"required"`
-	AuthProviderX509CertURL string `json:"auth_provider_x509_cert_url validate:"required""`
+	AuthProviderX509CertURL string `json:"auth_provider_x509_cert_url" validate:"required"`
 	ClientX509CertURL       string `json:"client_x509_cert_url" validate:"required"`
 }
 

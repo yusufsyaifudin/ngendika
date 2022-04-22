@@ -10,11 +10,13 @@ import (
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
 	"github.com/yusufsyaifudin/ngendika/internal/storage/fcmrepo"
+	"github.com/yusufsyaifudin/ngendika/pkg/fcm"
 )
 
 type DefaultServiceConfig struct {
 	FCMRepo    fcmrepo.Repo       `validate:"required"`
 	AppService appservice.Service `validate:"required"` // fcm service required app service
+	FCMClient  fcm.Client         `validate:"required"`
 }
 
 type DefaultService struct {
@@ -145,14 +147,114 @@ func (i *DefaultService) GetServerKey(ctx context.Context, input GetServerKeyIn)
 	return
 }
 
-func (i *DefaultService) GetApp(ctx context.Context, clientID string) (app appservice.App, err error) {
+func (i *DefaultService) FcmMulticast(ctx context.Context, input *FcmMulticastInput) (out *FCMMulticastOutput, err error) {
+	if input == nil {
+		return
+	}
+
+	err = validator.New().Struct(input)
+	if err != nil {
+		return
+	}
+
+	fcmService, err := i.GetSvcAccKey(ctx, GetSvcAccKeyIn{
+		ClientID: input.AppClientID,
+	})
+	if err != nil {
+		return
+	}
+
+	var multicastRes = make([]FCMMulticastResult, 0)
+	for _, serviceAccountKey := range fcmService.Lists {
+		batchRes, err := i.conf.FCMClient.SendMulticast(ctx, serviceAccountKey.ServiceAccountKey, input.Payload)
+		if err != nil {
+			multicastRes = append(multicastRes, FCMMulticastResult{
+				FCMKeyID: serviceAccountKey.ID,
+				Error:    err.Error(),
+			})
+			continue
+		}
+
+		multicastRes = append(multicastRes, FCMMulticastResult{
+			FCMKeyID:    serviceAccountKey.ID,
+			BatchResult: &batchRes,
+		})
+	}
+
+	if len(multicastRes) <= 0 {
+		// return nil when response is empty
+		out = nil
+		err = nil
+		return
+	}
+
+	// build final output
+	out = &FCMMulticastOutput{
+		Result: multicastRes,
+	}
+
+	return
+}
+
+func (i *DefaultService) FcmLegacy(ctx context.Context, input *FcmLegacyInput) (out *FCMLegacyOutput, err error) {
+	if input == nil {
+		return
+	}
+
+	err = validator.New().Struct(input)
+	if err != nil {
+		return
+	}
+
+	fcmServerKeys, err := i.GetServerKey(ctx, GetServerKeyIn{
+		ClientID: input.AppClientID,
+	})
+	if err != nil {
+		return
+	}
+
+	legacyResp := make([]FCMLegacyResult, 0)
+	for _, key := range fcmServerKeys.Lists {
+		batchRes, err := i.conf.FCMClient.SendLegacy(ctx, key.ServerKey, input.Payload)
+		if err != nil {
+			legacyResp = append(legacyResp, FCMLegacyResult{
+				FCMKeyID: key.ID,
+				Error:    err.Error(),
+			})
+			continue
+		}
+
+		legacyResp = append(legacyResp, FCMLegacyResult{
+			FCMKeyID:    key.ID,
+			BatchResult: &batchRes,
+		})
+	}
+
+	if len(legacyResp) <= 0 {
+		// return nil when response is empty
+		out = nil
+		err = nil
+		return
+	}
+
+	// build final output
+	out = &FCMLegacyOutput{
+		Result: legacyResp,
+	}
+
+	return
+}
+
+// --- helper function
+
+func (i *DefaultService) GetApp(ctx context.Context, clientID string) (app *appservice.App, err error) {
 	app, err = i.conf.AppService.GetAppByClientID(ctx, clientID)
 	if err != nil {
 		return
 	}
 
 	if !app.Enabled {
-		app = appservice.App{} // always use empty value on error
+		app = nil // always use empty value on error
 		err = fmt.Errorf("app %s is disabled", clientID)
 		return
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/yusufsyaifudin/ngendika/pkg/multidb"
+
 	_ "github.com/lib/pq"
 
 	"github.com/go-playground/validator/v10"
@@ -18,15 +20,13 @@ import (
 type Container interface {
 	AppRepo() (apprepo.Repo, error)
 	FCMRepo() (fcmrepo.Repo, error)
-	GetRedis() *RedisConnMaker
 }
 
 // DefaultContainerImpl the real implementation of Container
 type DefaultContainerImpl struct {
 	ctx       context.Context `validate:"required"`
 	cfg       *config.Config  `validate:"required,structonly"`
-	dbSqlConn *SqlDbConnMaker `validate:"required,structonly"` // all database connection
-	redisConn *RedisConnMaker `validate:"required,structonly"` // all redis connection
+	dbSqlConn multidb.MultiDB `validate:"required"` // all database connection
 }
 
 // Ensure that DefaultContainerImpl implements DefaultContainerImpl
@@ -38,15 +38,10 @@ var _ Container = (*DefaultContainerImpl)(nil)
 // the reason is when Setup called it must be close in deferred mode, any passed value using interface
 // won't let user Close any dependencies during run-time.
 func Setup(ctx context.Context, conf *config.Config) (*DefaultContainerImpl, error) {
-	dbSqlConn, err := NewSqlDbConnMaker(SqlDbConnMakerConfig{
+	dbSqlConn, err := multidb.NewSqlDbConnMaker(multidb.SqlDbConnMakerConfig{
 		Ctx:    ctx,
-		Config: conf.Database,
+		Config: multidb.Database(conf.Database),
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	redisConn, err := NewRedisConnMaker(ctx, conf.Redis)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +50,6 @@ func Setup(ctx context.Context, conf *config.Config) (*DefaultContainerImpl, err
 		ctx:       ctx,
 		cfg:       conf,
 		dbSqlConn: dbSqlConn,
-		redisConn: redisConn,
 	}
 
 	err = validator.New().Struct(dep)
@@ -71,53 +65,35 @@ func Setup(ctx context.Context, conf *config.Config) (*DefaultContainerImpl, err
 func (a *DefaultContainerImpl) AppRepo() (apprepo.Repo, error) {
 	repoConnInfo, ok := a.cfg.Database[a.cfg.AppRepo.Database]
 	if !ok {
-		err := fmt.Errorf("unknown database key %s", a.cfg.AppRepo.Database)
+		err := fmt.Errorf("unknown database key %s on appRepo", a.cfg.AppRepo.Database)
 		return nil, err
 	}
 
-	switch repoConnInfo.Driver {
-	case "mysql", "postgres":
-		sqlConn, err := a.dbSqlConn.Get(a.cfg.AppRepo.Database)
-		if err != nil {
-			return nil, err
-		}
-
-		return apprepo.Postgres(apprepo.RepoPostgresConfig{
-			Connection: sqlConn,
-		})
-
-	default:
-		err := fmt.Errorf("unknown driver %s", repoConnInfo.Driver)
+	sqlConn, err := a.dbSqlConn.Get(repoConnInfo.Driver, a.cfg.AppRepo.Database)
+	if err != nil {
 		return nil, err
 	}
+
+	return apprepo.Postgres(apprepo.RepoPostgresConfig{
+		Connection: sqlConn,
+	})
 }
 
 func (a *DefaultContainerImpl) FCMRepo() (fcmrepo.Repo, error) {
 	repoConnInfo, ok := a.cfg.Database[a.cfg.FCMRepo.Database]
 	if !ok {
-		err := fmt.Errorf("unknown database key %s", a.cfg.FCMRepo.Database)
+		err := fmt.Errorf("unknown database key %s on fcmRepo", a.cfg.FCMRepo.Database)
 		return nil, err
 	}
 
-	switch repoConnInfo.Driver {
-	case "mysql", "postgres":
-		sqlConn, err := a.dbSqlConn.Get(a.cfg.FCMRepo.Database)
-		if err != nil {
-			return nil, err
-		}
-
-		return fcmrepo.NewPostgres(fcmrepo.PostgresConfig{
-			Connection: sqlConn,
-		})
-
-	default:
-		err := fmt.Errorf("unknown driver %s", repoConnInfo.Driver)
+	sqlConn, err := a.dbSqlConn.Get(repoConnInfo.Driver, a.cfg.AppRepo.Database)
+	if err != nil {
 		return nil, err
 	}
-}
 
-func (a *DefaultContainerImpl) GetRedis() *RedisConnMaker {
-	return a.redisConn
+	return fcmrepo.NewPostgres(fcmrepo.PostgresConfig{
+		Connection: sqlConn,
+	})
 }
 
 // Close will close all dependencies.
@@ -126,10 +102,6 @@ func (a *DefaultContainerImpl) Close() error {
 	var err error
 	if _err := a.dbSqlConn.CloseAll(); _err != nil {
 		err = multierr.Append(err, fmt.Errorf("close db error: %w", _err))
-	}
-
-	if _err := a.redisConn.CloseAll(); _err != nil {
-		err = multierr.Append(err, fmt.Errorf("close redis error: %w", _err))
 	}
 
 	return err

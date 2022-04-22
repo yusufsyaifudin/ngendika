@@ -11,6 +11,6 @@ type Logger interface {
 
 type stdOut struct{}
 
-func (stdOut) Info(ctx context.Context, msg string) {
+func (*stdOut) Info(ctx context.Context, msg string) {
 	log.Println(msg)
 }

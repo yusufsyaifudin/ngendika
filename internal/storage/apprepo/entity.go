@@ -1,7 +1,6 @@
 package apprepo
 
 import (
-	"strings"
 	"time"
 )
 
@@ -12,13 +11,4 @@ type App struct {
 	Name      string    `json:"name" db:"name" validate:"required"`
 	Enabled   bool      `json:"enabled" db:"enabled" validate:"required"`
 	CreatedAt time.Time `json:"created_at" db:"created_at" validate:"required"`
-}
-
-func NewApp(clientID, name string) App {
-	return App{
-		ClientID:  strings.ToLower(clientID),
-		Name:      name,
-		Enabled:   true,
-		CreatedAt: time.Now().UTC(),
-	}
 }
