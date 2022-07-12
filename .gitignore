@@ -7,3 +7,4 @@ config_worker.yaml
 .hugo_build.lock
 example/fcm-web-example
 migration.yml
+public
