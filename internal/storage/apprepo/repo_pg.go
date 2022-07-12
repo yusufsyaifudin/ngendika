@@ -38,29 +38,54 @@ func Postgres(conf RepoPostgresConfig) (service *RepoPostgres, err error) {
 	return
 }
 
-func (p *RepoPostgres) CreateApp(ctx context.Context, app *App) (insertedApp *App, err error) {
-	err = validator.New().Struct(app)
+func (p *RepoPostgres) CreateApp(ctx context.Context, in InputCreateApp) (out OutCreateApp, err error) {
+	err = validator.New().Struct(in)
 	if err != nil {
 		err = fmt.Errorf("%w: %s", ErrValidation, err)
 		return
 	}
 
+	app := in.App
 	app.ClientID = strings.TrimSpace(strings.ToLower(app.ClientID))
 
-	insertedApp = &App{}
-	err = sqlx.GetContext(ctx, p.Config.Connection, insertedApp, sqlCreateApp,
+	insertedApp := App{}
+	err = sqlx.GetContext(ctx, p.Config.Connection, &insertedApp, sqlCreateApp,
 		app.ClientID, app.Name, app.Enabled, app.CreatedAt,
 	)
+
+	if err != nil {
+		return
+	}
+
+	out = OutCreateApp{
+		App: insertedApp,
+	}
 	return
 }
 
-func (p *RepoPostgres) GetAppByClientID(ctx context.Context, clientID string) (appData *App, err error) {
-	clientID = strings.ToLower(strings.TrimSpace(clientID))
-	if clientID == "" {
-		return appData, ErrAppWrongClientID
+func (p *RepoPostgres) GetApp(ctx context.Context, in InputGetApp) (out OutGetApp, err error) {
+	err = validator.New().Struct(in)
+	if err != nil {
+		err = fmt.Errorf("%w: %s", ErrValidation, err)
+		return
 	}
 
-	appData = &App{}
-	err = sqlx.GetContext(ctx, p.Config.Connection, appData, sqlGetAppByClientID, clientID)
+	appData := App{}
+	err = sqlx.GetContext(ctx, p.Config.Connection, &appData, sqlGetAppByClientID, in.ClientID)
+	if err != nil {
+		return
+	}
+
+	if in.Enabled != nil && *in.Enabled != appData.Enabled {
+		err = fmt.Errorf(
+			"app id %s is in enabled=%t state, you request enabled=%+v",
+			in.ClientID, appData.Enabled, in.Enabled,
+		)
+		return
+	}
+
+	out = OutGetApp{
+		App: appData,
+	}
 	return
 }

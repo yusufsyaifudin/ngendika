@@ -247,17 +247,17 @@ func (i *DefaultService) FcmLegacy(ctx context.Context, input *FcmLegacyInput) (
 
 // --- helper function
 
-func (i *DefaultService) GetApp(ctx context.Context, clientID string) (app *appservice.App, err error) {
-	app, err = i.conf.AppService.GetAppByClientID(ctx, clientID)
+func (i *DefaultService) GetApp(ctx context.Context, clientID string) (app appservice.App, err error) {
+	enabled := true
+
+	outGetApp, err := i.conf.AppService.GetApp(ctx, appservice.InputGetApp{
+		ClientID: clientID,
+		Enabled:  &enabled,
+	})
 	if err != nil {
 		return
 	}
 
-	if !app.Enabled {
-		app = nil // always use empty value on error
-		err = fmt.Errorf("app %s is disabled", clientID)
-		return
-	}
-
+	app = outGetApp.App
 	return
 }

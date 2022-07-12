@@ -1,8 +1,11 @@
 package multidb
 
-import "github.com/jmoiron/sqlx"
+import (
+	"github.com/jmoiron/sqlx"
+	"io"
+)
 
 type MultiDB interface {
-	Get(driver, key string) (*sqlx.DB, error)
-	CloseAll() error
+	GetSqlx(driver Driver, key string) (*sqlx.DB, error)
+	io.Closer
 }

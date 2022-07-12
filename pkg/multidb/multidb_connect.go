@@ -5,23 +5,26 @@ import (
 	"fmt"
 	"strings"
 
+	_ "github.com/lib/pq"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/jmoiron/sqlx"
+	"github.com/yusufsyaifudin/ngendika/pkg/closer"
 	"github.com/yusufsyaifudin/ylog"
 )
 
 type SqlDbConnMakerConfig struct {
-	Ctx    context.Context `validate:"required"`
-	Config Database        `validate:"required"`
+	Ctx    context.Context   `validate:"required"`
+	Config DatabaseResources `validate:"required"`
 }
 
 type SqlDbConnMaker struct {
 	ctx      context.Context
-	conf     Database
+	conf     DatabaseResources
 	disabled map[string]struct{} // list of disabled databases, using struct for minimal memory footprint
 	dbSQL    map[string]*sqlx.DB // db key name => real connection
-	dbDriver map[string]string   // db key name => driver name
-	closer   []Closer
+	dbDriver map[string]Driver   // db key name => driver name
+	closer   []closer.Closer
 }
 
 var _ MultiDB = (*SqlDbConnMaker)(nil)
@@ -38,14 +41,14 @@ func NewSqlDbConnMaker(conf SqlDbConnMakerConfig) (*SqlDbConnMaker, error) {
 		conf:     conf.Config,
 		disabled: make(map[string]struct{}),
 		dbSQL:    make(map[string]*sqlx.DB),
-		dbDriver: make(map[string]string),
-		closer:   make([]Closer, 0),
+		dbDriver: make(map[string]Driver),
+		closer:   make([]closer.Closer, 0),
 	}
 
 	err = instance.connect()
 	if err != nil {
 		// close previous opened connection if error happen
-		if _err := instance.CloseAll(); _err != nil {
+		if _err := instance.Close(); _err != nil {
 			err = fmt.Errorf("close db sql error: %w: %s", err, _err)
 		}
 
@@ -55,7 +58,7 @@ func NewSqlDbConnMaker(conf SqlDbConnMakerConfig) (*SqlDbConnMaker, error) {
 	return instance, nil
 }
 
-func (i *SqlDbConnMaker) Get(driver, key string) (*sqlx.DB, error) {
+func (i *SqlDbConnMaker) GetSqlx(driver Driver, key string) (*sqlx.DB, error) {
 	_, exists := i.disabled[key]
 	if exists {
 		return nil, fmt.Errorf("db with key '%s' is disabled", key)
@@ -74,21 +77,21 @@ func (i *SqlDbConnMaker) Get(driver, key string) (*sqlx.DB, error) {
 	return nil, fmt.Errorf("db key '%s' not using driver %s", key, driver)
 }
 
-func (i *SqlDbConnMaker) CloseAll() error {
+func (i *SqlDbConnMaker) Close() error {
 	ctx := i.ctx
 
 	ylog.Debug(ctx, "db sql: trying to close")
 
 	var err error
-	for _, closer := range i.closer {
-		if closer == nil {
+	for _, c := range i.closer {
+		if c == nil {
 			continue
 		}
 
-		if e := closer.Close(); e != nil {
+		if e := c.Close(); e != nil {
 			err = fmt.Errorf("%v: %w", err, e)
 		} else {
-			ylog.Debug(ctx, fmt.Sprintf("db sql: %s success to close", closer.Name()))
+			ylog.Debug(ctx, fmt.Sprintf("db sql: %s success to close", c))
 		}
 	}
 
@@ -115,20 +118,32 @@ func (i *SqlDbConnMaker) connect() error {
 			continue
 		}
 
-		dbConfig.Driver = strings.ToLower(strings.TrimSpace(dbConfig.Driver))
-		switch dbConfig.Driver {
-		case "mysql", "postgres":
-			sqlxConn, err := sqlx.ConnectContext(ctx, dbConfig.Driver, dbConfig.DSN)
-			if err != nil {
-				err = fmt.Errorf("error connecting to database %s: %w", key, err)
-				return err
-			}
+		var (
+			sqlxConn *sqlx.DB
+			err      error
+		)
 
-			// don't forget to register in closer, using unique name to track in the Log
-			i.dbSQL[key] = sqlxConn
-			i.dbDriver[key] = dbConfig.Driver
-			i.closer = append(i.closer, newNamedCloser(key, sqlxConn))
+		switch dbConfig.Driver {
+		case Mysql:
+			sqlxConn, err = sqlx.ConnectContext(ctx, dbConfig.Driver.String(), dbConfig.Mysql.DSN)
+
+		case Postgres:
+			sqlxConn, err = sqlx.ConnectContext(ctx, dbConfig.Driver.String(), dbConfig.Postgres.DSN)
+
+		default:
+			err = fmt.Errorf("not supported driver %s", dbConfig.Driver)
+			return err
 		}
+
+		if err != nil {
+			err = fmt.Errorf("error connecting to database %s: %w", key, err)
+			return err
+		}
+
+		// don't forget to register in closer, using unique name to track in the Log
+		i.dbSQL[key] = sqlxConn
+		i.dbDriver[key] = dbConfig.Driver
+		i.closer = append(i.closer, closer.NewNamedCloser(key, sqlxConn))
 	}
 
 	return nil

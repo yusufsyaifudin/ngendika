@@ -6,10 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yusufsyaifudin/ylog"
-
 	"github.com/go-playground/validator/v10"
 	"github.com/yusufsyaifudin/ngendika/internal/storage/apprepo"
+	"github.com/yusufsyaifudin/ylog"
 )
 
 type DefaultServiceConfig struct {
@@ -34,50 +33,56 @@ func New(dep DefaultServiceConfig) (*DefaultService, error) {
 
 // CreateApp is a function that knows business logic.
 // It doesn't know whether the input come from HTTP or GRPC or any input.
-func (d *DefaultService) CreateApp(ctx context.Context, input CreateAppIn) (out CreateAppOut, err error) {
+func (d *DefaultService) CreateApp(ctx context.Context, input InputCreateApp) (out OutCreateApp, err error) {
 	err = validator.New().Struct(input)
 	if err != nil {
 		err = fmt.Errorf("validation error, missing required field: %w", err)
 		return
 	}
 
-	existingApp, err := d.GetAppByClientID(ctx, input.ClientID)
+	existingApp, err := d.GetApp(ctx, InputGetApp{
+		ClientID: input.ClientID,
+	})
 	if err != nil {
 		// log and then discard error
 		ylog.Error(ctx, "get app by id error, continuing to try to insert", ylog.KV("error", err))
 		err = nil
 	}
 
-	if existingApp != nil {
-		err = fmt.Errorf("app with client id '%s' already exist", existingApp.ClientID)
+	if existingApp.App.ID != "" {
+		err = fmt.Errorf("app with client id '%s' already exist", existingApp.App.ClientID)
 		return
 	}
 
-	app := &apprepo.App{
+	appInput := apprepo.App{
 		ClientID:  strings.ToLower(input.ClientID),
 		Name:      input.Name,
 		Enabled:   true,
 		CreatedAt: time.Now().UTC(),
 	}
 
-	app, err = d.conf.AppRepo.CreateApp(ctx, app)
+	appOut, err := d.conf.AppRepo.CreateApp(ctx, apprepo.InputCreateApp{
+		App: appInput,
+	})
 	if err != nil {
 		return
 	}
 
-	out = CreateAppOut{
-		App: AppFromRepo(app),
+	out = OutCreateApp{
+		App: AppFromRepo(appOut.App),
 	}
 	return
 }
 
-func (d *DefaultService) GetAppByClientID(ctx context.Context, clientID string) (app *App, err error) {
-	out, err := d.conf.AppRepo.GetAppByClientID(ctx, clientID)
+func (d *DefaultService) GetApp(ctx context.Context, input InputGetApp) (out OutGetApp, err error) {
+	outGetApp, err := d.conf.AppRepo.GetApp(ctx, apprepo.InputGetApp(input))
 	if err != nil {
-		err = fmt.Errorf("not found app client id '%s': %w", clientID, err)
+		err = fmt.Errorf("not found app client id '%s': %w", input.ClientID, err)
 		return
 	}
 
-	app = AppFromRepo(out)
+	out = OutGetApp{
+		App: AppFromRepo(outGetApp.App),
+	}
 	return
 }

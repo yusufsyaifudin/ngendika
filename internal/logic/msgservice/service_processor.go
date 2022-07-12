@@ -38,103 +38,103 @@ func NewProcessor(conf ProcessorConfig) (*Processor, error) {
 	}, nil
 }
 
-func (p *Processor) Process() Process {
-	return func(ctx context.Context, task *Task) (out *TaskResult, err error) {
+func (p *Processor) Process(ctx context.Context, task *Task) (out *TaskResult, err error) {
 
-		var (
-			outFCMMulticast    *fcmservice.FCMMulticastOutput
-			outFCMMulticastErr error
-			outFCMLegacy       *fcmservice.FCMLegacyOutput
-			outFCMLegacyErr    error
-			outWebhook         *WebhookOutput
-			outWebhookErr      error
-		)
+	var (
+		outFCMMulticast    *fcmservice.FCMMulticastOutput
+		outFCMMulticastErr error
+		outFCMLegacy       *fcmservice.FCMLegacyOutput
+		outFCMLegacyErr    error
+		outWebhook         *WebhookOutput
+		outWebhookErr      error
+	)
 
-		// perform task on each payload
-		wg := sync.WaitGroup{}
+	// perform task on each payload
+	wg := sync.WaitGroup{}
 
-		if task.Message.FCMMulticast != nil {
-			err = p.sem.Acquire(ctx, 1)
-			if err != nil {
-				err = fmt.Errorf("cannot acquire semaphore: %w", err)
-				return
-			}
+	if task.Message.FCMMulticast != nil {
+		err = p.sem.Acquire(ctx, 1)
+		if err != nil {
+			err = fmt.Errorf("cannot acquire semaphore: %w", err)
+			return
+		}
 
-			wg.Add(1)
+		wg.Add(1)
 
-			go func() {
-				defer func() {
-					wg.Done()
-					p.sem.Release(1)
-				}()
+		go func() {
+			defer func() {
+				wg.Done()
+				p.sem.Release(1)
+			}()
 
-				outFCMMulticast, outFCMMulticastErr = p.Config.FCMService.FcmMulticast(ctx, &fcmservice.FcmMulticastInput{
+			outFCMMulticast, outFCMMulticastErr = p.Config.FCMService.
+				FcmMulticast(ctx, &fcmservice.FcmMulticastInput{
 					AppClientID: task.ClientID,
 					Payload:     task.Message.FCMMulticast,
 				})
-			}()
+		}()
+	}
+
+	if task.Message.FCMLegacy != nil {
+		err = p.sem.Acquire(ctx, 1)
+		if err != nil {
+			err = fmt.Errorf("cannot acquire semaphore: %w", err)
+			return
 		}
 
-		if task.Message.FCMLegacy != nil {
-			err = p.sem.Acquire(ctx, 1)
-			if err != nil {
-				err = fmt.Errorf("cannot acquire semaphore: %w", err)
-				return
-			}
+		wg.Add(1)
 
-			wg.Add(1)
+		go func() {
+			defer func() {
+				wg.Done()
+				p.sem.Release(1)
+			}()
 
-			go func() {
-				defer func() {
-					wg.Done()
-					p.sem.Release(1)
-				}()
-
-				outFCMLegacy, outFCMLegacyErr = p.Config.FCMService.FcmLegacy(ctx, &fcmservice.FcmLegacyInput{
+			outFCMLegacy, outFCMLegacyErr = p.Config.FCMService.
+				FcmLegacy(ctx, &fcmservice.FcmLegacyInput{
 					AppClientID: task.ClientID,
 					Payload:     task.Message.FCMLegacy,
 				})
-			}()
-		}
-
-		if task.Message.Webhook != nil && len(task.Message.Webhook) > 0 {
-			err = p.sem.Acquire(ctx, 1)
-			if err != nil {
-				err = fmt.Errorf("cannot acquire semaphore: %w", err)
-				return
-			}
-
-			wg.Add(1)
-
-			go func() {
-				defer func() {
-					wg.Done()
-					p.sem.Release(1)
-				}()
-
-				outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
-					AppClientID: task.ClientID,
-					Webhook:     task.Message.Webhook,
-				})
-			}()
-		}
-
-		// wait for all go routine to succeed
-		wg.Wait()
-
-		out = &TaskResult{
-			TaskID:            task.TaskID,
-			AppClientID:       task.ClientID,
-			FCMMulticast:      outFCMMulticast,
-			FCMMulticastError: ErrorString(outFCMMulticastErr),
-			FCMLegacy:         outFCMLegacy,
-			FCMLegacyError:    ErrorString(outFCMLegacyErr),
-			Webhook:           outWebhook,
-			WebhookError:      ErrorString(outWebhookErr),
-		}
-
-		return
+		}()
 	}
+
+	if task.Message.Webhook != nil && len(task.Message.Webhook) > 0 {
+		err = p.sem.Acquire(ctx, 1)
+		if err != nil {
+			err = fmt.Errorf("cannot acquire semaphore: %w", err)
+			return
+		}
+
+		wg.Add(1)
+
+		go func() {
+			defer func() {
+				wg.Done()
+				p.sem.Release(1)
+			}()
+
+			outWebhook, outWebhookErr = p.Webhook(ctx, &WebhookInput{
+				AppClientID: task.ClientID,
+				Webhook:     task.Message.Webhook,
+			})
+		}()
+	}
+
+	// wait for all go routine to succeed
+	wg.Wait()
+
+	out = &TaskResult{
+		TaskID:            task.TaskID,
+		AppClientID:       task.ClientID,
+		FCMMulticast:      outFCMMulticast,
+		FCMMulticastError: ErrorString(outFCMMulticastErr),
+		FCMLegacy:         outFCMLegacy,
+		FCMLegacyError:    ErrorString(outFCMLegacyErr),
+		Webhook:           outWebhook,
+		WebhookError:      ErrorString(outWebhookErr),
+	}
+
+	return
 }
 
 func (p *Processor) Webhook(ctx context.Context, input *WebhookInput) (out *WebhookOutput, err error) {

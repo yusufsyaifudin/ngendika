@@ -1,10 +1,28 @@
 package multidb
 
-type DBConnection struct {
-	Disable bool   `yaml:"disable" flag:"disable"`
-	Debug   bool   `yaml:"debug" flag:"debug"`
-	Driver  string `yaml:"driver" flag:"driver"`
-	DSN     string `yaml:"dsn" flag:"dsn"` // Data Source Name
+type Driver string
+
+func (d Driver) String() string {
+	return string(d)
 }
 
-type Database map[string]DBConnection
+const (
+	Mysql    Driver = "mysql"
+	Postgres Driver = "postgres"
+)
+
+type GoSqlDb struct {
+	Debug bool
+	DSN   string // Data Source Name
+}
+
+type DatabaseResource struct {
+	Disable bool
+	Driver  Driver // mysql, postgres, etc
+
+	// per driver configuration
+	Mysql    GoSqlDb
+	Postgres GoSqlDb
+}
+
+type DatabaseResources map[string]DatabaseResource

@@ -58,16 +58,13 @@ func (h *HandlerMessageService) SendMessage() func(http.ResponseWriter, *http.Re
 			return
 		}
 
-		var msgServiceProcess msgservice.Process
-		msgServiceProcess = h.Config.MsgServiceProcessor.Process()
-
 		uuid, err := h.Config.UID.NextID()
 		if err != nil {
 			return
 		}
 
 		var taskResult *msgservice.TaskResult
-		taskResult, err = msgServiceProcess(ctx, &msgservice.Task{
+		taskResult, err = h.Config.MsgServiceProcessor.Process(ctx, &msgservice.Task{
 			TraceInfo: ylog.MustExtract(ctx),
 			TaskID:    fmt.Sprint(uuid),
 			ClientID:  reqBody.ClientID,

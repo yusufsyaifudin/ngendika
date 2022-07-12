@@ -1,13 +1,11 @@
 package http
 
 import (
-	"net/http"
-	"time"
-
 	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/encoding/json"
 	"github.com/yusufsyaifudin/ngendika/internal/logic/appservice"
 	"github.com/yusufsyaifudin/ngendika/pkg/response"
+	"net/http"
 )
 
 type HandlerAppServiceConfig struct {
@@ -32,16 +30,11 @@ func NewHandlerAppService(conf HandlerAppServiceConfig) (*HandlerAppService, err
 // CreateApp .
 func (h *HandlerAppService) CreateApp() func(http.ResponseWriter, *http.Request) {
 	type Request struct {
-		ClientID string `json:"client_id" validate:"required"`
-		Name     string `json:"name" validate:"required"`
+		appservice.InputCreateApp `json:",inline"`
 	}
 
 	type Response struct {
-		ID        string    `json:"id"`
-		ClientID  string    `json:"client_id"`
-		Name      string    `json:"name"`
-		Enabled   bool      `json:"enabled"`
-		CreatedAt time.Time `json:"created_at"`
+		appservice.OutCreateApp `json:",inline"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +42,6 @@ func (h *HandlerAppService) CreateApp() func(http.ResponseWriter, *http.Request)
 
 		var reqBody Request
 		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
 		err := dec.Decode(&reqBody)
 		if err != nil {
 			resp := h.Config.ResponseConstructor.HTTPError(ctx, response.ErrValidation, err)
@@ -57,10 +49,7 @@ func (h *HandlerAppService) CreateApp() func(http.ResponseWriter, *http.Request)
 			return
 		}
 
-		out, err := h.Config.AppService.CreateApp(ctx, appservice.CreateAppIn{
-			ClientID: reqBody.ClientID,
-			Name:     reqBody.Name,
-		})
+		out, err := h.Config.AppService.CreateApp(ctx, reqBody.InputCreateApp)
 		if err != nil {
 			resp := h.Config.ResponseConstructor.HTTPError(ctx, response.ErrUnhandled, err)
 			h.Config.ResponseWriter.JSON(http.StatusBadRequest, w, r, resp)
@@ -68,11 +57,7 @@ func (h *HandlerAppService) CreateApp() func(http.ResponseWriter, *http.Request)
 		}
 
 		respBody := Response{
-			ID:        out.App.ID,
-			ClientID:  out.App.ClientID,
-			Name:      out.App.Name,
-			Enabled:   out.App.Enabled,
-			CreatedAt: out.App.CreatedAt,
+			OutCreateApp: out,
 		}
 
 		resp := h.Config.ResponseConstructor.HTTPSuccess(ctx, respBody)

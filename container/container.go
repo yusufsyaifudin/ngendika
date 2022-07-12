@@ -3,10 +3,8 @@ package container
 import (
 	"context"
 	"fmt"
-
 	"github.com/yusufsyaifudin/ngendika/pkg/multidb"
-
-	_ "github.com/lib/pq"
+	"io"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/yusufsyaifudin/ngendika/config"
@@ -18,6 +16,8 @@ import (
 // Container is an abstraction layer to be used in use-case to stitch all business logic.
 // Use this when you pass into another struct.
 type Container interface {
+	io.Closer
+
 	AppRepo() (apprepo.Repo, error)
 	FCMRepo() (fcmrepo.Repo, error)
 }
@@ -38,9 +38,19 @@ var _ Container = (*DefaultContainerImpl)(nil)
 // the reason is when Setup called it must be close in deferred mode, any passed value using interface
 // won't let user Close any dependencies during run-time.
 func Setup(ctx context.Context, conf *config.Config) (*DefaultContainerImpl, error) {
+	dbConfig := multidb.DatabaseResources{}
+	for name, conn := range conf.DatabaseResources {
+		dbConfig[name] = multidb.DatabaseResource{
+			Disable:  conn.Disable,
+			Driver:   multidb.Driver(conn.Driver),
+			Mysql:    multidb.GoSqlDb(conn.Mysql),
+			Postgres: multidb.GoSqlDb(conn.Postgres),
+		}
+	}
+
 	dbSqlConn, err := multidb.NewSqlDbConnMaker(multidb.SqlDbConnMakerConfig{
 		Ctx:    ctx,
-		Config: multidb.Database(conf.Database),
+		Config: dbConfig,
 	})
 	if err != nil {
 		return nil, err
@@ -60,16 +70,16 @@ func Setup(ctx context.Context, conf *config.Config) (*DefaultContainerImpl, err
 	return dep, nil
 }
 
-// AppRepo return appstore.Repo and return error when connection is closed or nil.
+// AppRepo return apprepo.Repo and return error when connection is closed or nil.
 // This should never have caused panic.
 func (a *DefaultContainerImpl) AppRepo() (apprepo.Repo, error) {
-	repoConnInfo, ok := a.cfg.Database[a.cfg.AppRepo.Database]
+	repoConnInfo, ok := a.cfg.DatabaseResources[a.cfg.AppRepo.DBLabel]
 	if !ok {
-		err := fmt.Errorf("unknown database key %s on appRepo", a.cfg.AppRepo.Database)
+		err := fmt.Errorf("unknown database key %s on appRepo", a.cfg.AppRepo.DBLabel)
 		return nil, err
 	}
 
-	sqlConn, err := a.dbSqlConn.Get(repoConnInfo.Driver, a.cfg.AppRepo.Database)
+	sqlConn, err := a.dbSqlConn.GetSqlx(multidb.Driver(repoConnInfo.Driver), a.cfg.AppRepo.DBLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -80,13 +90,13 @@ func (a *DefaultContainerImpl) AppRepo() (apprepo.Repo, error) {
 }
 
 func (a *DefaultContainerImpl) FCMRepo() (fcmrepo.Repo, error) {
-	repoConnInfo, ok := a.cfg.Database[a.cfg.FCMRepo.Database]
+	repoConnInfo, ok := a.cfg.DatabaseResources[a.cfg.FCMRepo.DBLabel]
 	if !ok {
-		err := fmt.Errorf("unknown database key %s on fcmRepo", a.cfg.FCMRepo.Database)
+		err := fmt.Errorf("unknown database key %s on fcmRepo", a.cfg.FCMRepo.DBLabel)
 		return nil, err
 	}
 
-	sqlConn, err := a.dbSqlConn.Get(repoConnInfo.Driver, a.cfg.AppRepo.Database)
+	sqlConn, err := a.dbSqlConn.GetSqlx(multidb.Driver(repoConnInfo.Driver), a.cfg.FCMRepo.DBLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +110,7 @@ func (a *DefaultContainerImpl) FCMRepo() (fcmrepo.Repo, error) {
 func (a *DefaultContainerImpl) Close() error {
 
 	var err error
-	if _err := a.dbSqlConn.CloseAll(); _err != nil {
+	if _err := a.dbSqlConn.Close(); _err != nil {
 		err = multierr.Append(err, fmt.Errorf("close db error: %w", _err))
 	}
 
