@@ -82,7 +82,7 @@ func (w *Worker) worker(id int) {
 		for {
 			select {
 			case job := <-w.JobQueue:
-				// fmt.Println("worker", id, "started  job", job.ID())
+				// fmt.Println("worker", id, "started  job", job.FCMServiceAccountKey())
 				if job == nil {
 					continue
 				}

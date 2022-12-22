@@ -1,11 +1,25 @@
-apprepo:
+# use https://github.com/rubenv/sql-migrate
+app_repo:
   dialect: postgres
-  datasource: user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable
+  datasource: user=postgres password=postgres host=localhost port=5433 dbname=ngendika sslmode=disable
   dir: assets/migrations/postgres/apprepo
   table: migrations_apprepo
 
-fcmrepo:
+email_cfg_repo:
   dialect: postgres
-  datasource: user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable
+  datasource: user=postgres password=postgres host=localhost port=5433 dbname=ngendika sslmode=disable
+  dir: assets/migrations/postgres/emailcfgrepo
+  table: migrations_emailcfgrepo
+
+fcm_repo:
+  dialect: postgres
+  datasource: user=postgres password=postgres host=localhost port=5433 dbname=ngendika sslmode=disable
   dir: assets/migrations/postgres/fcmrepo
   table: migrations_fcmrepo
+
+
+service_provider_repo:
+  dialect: postgres
+  datasource: user=postgres password=postgres host=localhost port=5433 dbname=ngendika sslmode=disable
+  dir: assets/migrations/postgres/push_providers_repo
+  table: migrations_push_providers_repo

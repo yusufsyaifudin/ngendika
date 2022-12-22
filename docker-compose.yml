@@ -10,11 +10,23 @@ services:
     networks:
       - ngendika-network
     environment:
-      - POSTGRES_USER=danbam
-      - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=danbam
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=ngendika
     volumes:
       - ./logs/postgres_data:/var/lib/postgresql/data
+
+  pgadmin:
+    container_name: pgadmin4
+    image: dpage/pgadmin4
+    restart: always
+    networks:
+      - ngendika-network
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+    ports:
+      - "5050:80"
 
 
 networks:

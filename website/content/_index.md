@@ -1,18 +1,34 @@
 ---
-title: Welcome to the documentation
-geekdocNav: false
-geekdocAlign: center
-geekdocAnchor: false
+title: Ngendika
 ---
 
 
+Ngendika is a self-hosted notification server that easy to use.
 
-<span class="badge-placeholder">[![Build Status](https://img.shields.io/drone/build/thegeeklab/hugo-geekdoc?logo=drone&server=https%3A%2F%2Fdrone.thegeeklab.de)](https://drone.thegeeklab.de/thegeeklab/hugo-geekdoc)</span>
-<span class="badge-placeholder">[![Hugo Version](https://img.shields.io/badge/hugo-0.83-blue.svg)](https://gohugo.io)</span>
-<span class="badge-placeholder">[![GitHub release](https://img.shields.io/github/v/release/thegeeklab/hugo-geekdoc)](https://github.com/thegeeklab/hugo-geekdoc/releases/latest)</span>
-<span class="badge-placeholder">[![GitHub contributors](https://img.shields.io/github/contributors/thegeeklab/hugo-geekdoc)](https://github.com/thegeeklab/hugo-geekdoc/graphs/contributors)</span>
-<span class="badge-placeholder">[![License: MIT](https://img.shields.io/github/license/thegeeklab/hugo-geekdoc)](https://github.com/thegeeklab/hugo-geekdoc/blob/main/LICENSE)</span>
+{{< mermaid >}}
+%%{init:{"theme":"forest"}}%%
+graph LR;
+I[Install] --> App[Create App]
 
-Geekdoc is a simple Hugo theme for documentations. It is intentionally designed as a fast and lean theme and may not fit the requirements of complex projects. If a more feature-complete theme is required there are a lot of got alternatives out there.
 
-{{< button relref="/docs" >}}See Documentation{{< /button >}}
+App -->|Email| EmailCfg[Save Email Config]
+EmailCfg --> SendEmail[Send Email]
+
+App -->|FCM| FCMKey[Save FCM Service Account Key]
+FCMKey --> SendFCM[Send Push Notification through FCM]
+
+App -->|Webhook| Web[Webhook URL]
+
+{{< /mermaid >}}
+
+
+Using Ngendika, you doesn't need to write or deploy the Push Notification server each time you need it.
+
+Think of it as a Push Notification SaaS but you own your infrastructure!
+
+Ngendika is:
+
+* Scalable - Each configuration of an Application (or tenant) is saved in the same table, but we use partitioning to ensure the data is scoped.
+
+
+{{% button href="/getting-started" %}}Getting Started{{% /button %}}

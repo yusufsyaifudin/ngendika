@@ -8,26 +8,26 @@ transport:
     port: 1234
 
 # dependencies connection
-# note that key must be alphanumeric only, e.g: db1, postgre1, mysql1
+# note that key must be alphanumeric only, e.g: db1, postgres1, mysql1
 ## define all database connection at once
-database:
-  db1:
+## If you use the same database for different services, the connection pool will be shared
+databaseResources:
+  allInOneDB:
     disable: false
-    debug: true
     driver: "postgres"
-    dsn: "user=postgres password=postgres host=localhost port=5432 dbname=ngendika sslmode=disable" # Data Source Name
+    postgres:
+      debug: true
+      dsn: "user=postgres password=postgres host=localhost port=5433 dbname=ngendika sslmode=disable" # Data Source Name
 
-# settings each repository, select based on dependencies connection
-## appstore to save application information
-appRepo:
-  database: db1 # refer to database
+services:
+  # settings each repository, select based on dependencies connection
+  ## appstore to save application information
+  app:
+    dbLabel: allInOneDB # refer to databaseResources
 
-fcmRepo:
-  database: db1 # refer to database
+  serviceProvider:
+    dbLabel: allInOneDB # refer to databaseResources
 
-msgRepo:
-  database: db1 # refer to database
-
-## service
-msgService:
-  maxParallel: 10 # number of semaphore to limit the number of goroutines working on parallel tasks
+  messaging:
+    maxBuffer: 100
+    maxParallel: 10 # number of semaphore to limit the number of goroutines working on parallel tasks

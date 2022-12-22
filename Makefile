@@ -1,8 +1,8 @@
 CURRENT_TIME := `date +%s`
 
 generate-swagger:
-	swagger generate spec -m -o ./docs/api.swagger.json
-	swagger validate ./docs/api.swagger.json
+	go run main.go apidoc
+	swagger validate assets/swaggerui/swagger.json
 #	rm -rf internal/httpclient
 #	mkdir -p internal/httpclient
 #	swagger generate client -f ./docs/api.swagger.json -t internal/httpclient -A DanBam
@@ -17,7 +17,7 @@ generate-cli-doc:
 create-migration:
 	@[ ! -z ${NAME} ]
 	mkdir -p assets/migrate
-	python scripts/makefile_helper/helper.py write_migration ${NAME}
+	python3 scripts/makefile_helper/helper.py write_migration ${NAME}
 	@go fmt assets/migrate/*
 
 test:

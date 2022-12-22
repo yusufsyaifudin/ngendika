@@ -7,7 +7,6 @@ func (d Driver) String() string {
 }
 
 const (
-	Mysql    Driver = "mysql"
 	Postgres Driver = "postgres"
 )
 
@@ -18,10 +17,9 @@ type GoSqlDb struct {
 
 type DatabaseResource struct {
 	Disable bool
-	Driver  Driver // mysql, postgres, etc
+	Driver  Driver // postgres, etc
 
 	// per driver configuration
-	Mysql    GoSqlDb
 	Postgres GoSqlDb
 }
 

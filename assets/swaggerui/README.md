@@ -1,0 +1,1 @@
+The original code is from here https://github.com/swagger-api/swagger-ui/tree/v4.15.5/dist

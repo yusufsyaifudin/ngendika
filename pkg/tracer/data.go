@@ -1,6 +1,6 @@
 package tracer
 
-type Data struct {
+type LogData struct {
 	RemoteAddr string `tracer:"remote_addr"`
 	TraceID    string `tracer:"trace_id"`
 }

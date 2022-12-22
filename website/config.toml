@@ -1,27 +1,19 @@
 baseURL = 'http://localhost/'
 languageCode = 'en-us'
 title = 'Ngendika Website'
-theme = "hugo-geekdoc"
+# Change the default theme to be use when building the site with Hugo
+theme = "hugo-theme-relearn"
 
+# For search functionality
+[outputs]
+home = ["HTML", "RSS", "SEARCH", "SEARCHPAGE"]
 
-pluralizeListTitles = false
-
-# Geekdoc required configuration
-pygmentsUseClasses = true
-pygmentsCodeFences = true
-disablePathToLower = true
-
-# Required if you want to render robots.txt template
-enableRobotsTXT = true
-
-# Needed for mermaid shortcodes
 [markup]
-[markup.goldmark.renderer]
-# Needed for mermaid shortcode
-unsafe = true
-[markup.tableOfContents]
-startLevel = 1
-endLevel = 9
+[markup.highlight]
+# if set to `guessSyntax = true`, there will be no unstyled code even if no language
+# was given BUT mermaid code fences will not work anymore! So this is a mandatory
+# setting for your site
+guessSyntax = false
 
-[taxonomies]
-tag = "tags"
+# choose a color theme or create your own
+style = "base16-snazzy"
