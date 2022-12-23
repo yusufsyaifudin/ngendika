@@ -19,37 +19,24 @@ func PnpCreate(ctx context.Context, components openapi3.Components, path map[str
 	const routeName = "Add Push Notification Provider"
 	const pathRoute = "/api/v1/pnp"
 
-	// --- Request schema
-	allReqSchema := make([]*openapi3.SchemaRef, 0)
-	for _, example := range backend.MuxBackend().Examples(ctx) {
-		reqStruct := handlerpnp.CreateReq{
-			BackendConfig: struct {
-				Provider       string      `json:"provider" validate:"required"`
-				Label          string      `json:"label" validate:"required"`
-				CredentialJSON interface{} `json:"credential_json" validate:"required"`
-			}{
-				Provider:       example.Provider,
-				Label:          fmt.Sprintf("my-%s-config", example.Provider),
-				CredentialJSON: example.BackendConfig,
-			},
-		}
-
-		// generate request
-		outReq := MustNewSchemaGenerator(ctx, fmt.Sprintf("%s.%s.", scopedSchemaName, example.Provider), reqStruct)
-		for s, ref := range outReq.Schemas {
-			components.Schemas[s] = ref
-		}
-
-		allReqSchema = append(allReqSchema, &openapi3.SchemaRef{
-			Ref: fmt.Sprintf("#/components/schemas/%s", outReq.ParentSchemaName),
-		})
+	credentialJson, _ := new(backend.NoopBackend).Example(ctx)
+	reqStruct := handlerpnp.CreateReq{
+		BackendConfig: struct {
+			Provider       string      `json:"provider" validate:"required"`
+			Label          string      `json:"label" validate:"required"`
+			CredentialJSON interface{} `json:"credential_json" validate:"required"`
+		}{
+			Provider:       "registered-provider-name",
+			Label:          "my-custom-config",
+			CredentialJSON: credentialJson,
+		},
 	}
 
-	reqSchemaName := fmt.Sprintf("%sReq", scopedSchemaName)
-	components.Schemas[reqSchemaName] = &openapi3.SchemaRef{
-		Value: &openapi3.Schema{
-			OneOf: allReqSchema,
-		},
+	// generate request
+	outReq := MustNewSchemaGenerator(ctx, fmt.Sprintf("%s.", scopedSchemaName), reqStruct)
+	reqSchemaName := outReq.ParentSchemaName
+	for s, ref := range outReq.Schemas {
+		components.Schemas[s] = ref
 	}
 
 	reqBody := openapi3.NewRequestBody()
@@ -94,6 +81,12 @@ func PnpCreate(ctx context.Context, components openapi3.Components, path map[str
 
 	op.RequestBody = &openapi3.RequestBodyRef{
 		Ref: fmt.Sprintf("#/components/requestBodies/%s", scopedSchemaName), // refer to generated name we define above
+		Value: &openapi3.RequestBody{
+			ExtensionProps: openapi3.ExtensionProps{},
+			Description:    "",
+			Required:       false,
+			Content:        nil,
+		},
 	}
 	op.AddResponse(http.StatusCreated, openapi3.NewResponse().WithJSONSchemaRef(
 		&openapi3.SchemaRef{
